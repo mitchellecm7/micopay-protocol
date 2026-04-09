@@ -33,13 +33,13 @@ cd micopay-mvp
 npm install
 
 # 2. Set environment variables
-cp .env.example .env
-# Add ANTHROPIC_API_KEY at minimum
+cp apps/api/.env.example apps/api/.env
+# Edit apps/api/.env — add ANTHROPIC_API_KEY
 
-# 3. Start API
+# 3. Start API (port 3000)
 cd apps/api && npm run dev
 
-# 4. Start dashboard
+# 4. Start dashboard (port 5173)
 cd apps/web && npm run dev
 
 # 5. Run the demo
@@ -62,6 +62,19 @@ bash scripts/demo.sh
 | Swap Status | `GET /api/v1/swaps/:id/status` | $0.0001 |
 | **Fund Micopay** | `POST /api/v1/fund` | **$0.10** |
 
+### x402 Flow
+
+```
+Agent → GET /api/v1/swaps/search
+      ← 402 { challenge: { amount_usdc: "0.001", pay_to: "G...", memo: "micopay:swap_search" } }
+
+Agent builds Stellar USDC payment tx, signs it
+
+Agent → GET /api/v1/swaps/search
+        X-Payment: <signed_xdr>
+      ← 200 { counterparties: [...] }
+```
+
 ---
 
 ## Architecture
@@ -73,7 +86,7 @@ bash scripts/demo.sh
                          │ natural language intent
                          ▼
 ┌─────────────────────────────────────────────────┐
-│         Intent Parser (Claude API)               │
+│         Intent Parser (Claude Haiku)             │
 │  • Understands intent                            │
 │  • Calls tools: search_swaps, get_reputation     │
 │  • Produces SwapPlan JSON                        │
@@ -113,16 +126,16 @@ bash scripts/demo.sh
 ## Repository Structure
 
 ```
-micopay-protocol/
+micopay-mvp/
 ├── contracts/
 │   ├── htlc-core/          # HashedTimeLock trait (Rust)
 │   ├── atomic-swap/        # Clean HTLC for cross-chain swaps
-│   └── micopay-escrow/     # P2P escrow with disputes & reputation
+│   └── micopay-escrow/     # P2P escrow with platform fee
 ├── packages/
 │   ├── types/              # Shared TypeScript types
 │   └── sdk/                # AtomicSwapClient + Stellar helpers
 ├── apps/
-│   ├── api/                # Fastify API with x402 middleware
+│   ├── api/                # Fastify API with x402 middleware + Claude agent
 │   ├── agent/              # Claude intent parser + SwapExecutor
 │   └── web/                # React dashboard
 ├── skill/
@@ -136,44 +149,101 @@ micopay-protocol/
 
 ## Contracts (Soroban/Rust)
 
-9 unit tests, all passing:
+**32 unit tests, all passing:**
 
 ```bash
 cd contracts && cargo test
-# atomic-swap: 4 tests ✓
-# micopay-escrow: 5 tests ✓
+# atomic-swap:    15 tests ✓
+# micopay-escrow: 17 tests ✓
+# htlc-core:       0 tests (trait-only crate)
 ```
 
-The `HashedTimeLock` trait defines the shared interface. Both contracts implement `lock()`, `release()`, and `refund()`. The same TypeScript SDK client works with both.
+### AtomicSwapHTLC — `contracts/atomic-swap`
+
+Clean HTLC for cross-chain atomic swaps. No fees, no business logic.
+
+| Function | Description |
+|----------|-------------|
+| `lock(initiator, counterparty, token, amount, secret_hash, timeout_ledgers)` | Lock funds. Returns `swap_id = sha256(secret_hash)` |
+| `release(swap_id, secret)` | Release to counterparty. Publishes secret in event for cross-chain coordination. |
+| `refund(swap_id)` | Permissionless refund after timeout. |
+| `get_swap(swap_id)` | View swap state. |
+
+### MicopayEscrow — `contracts/micopay-escrow`
+
+P2P escrow with platform fee collection.
+
+| Function | Description |
+|----------|-------------|
+| `initialize(admin, token_id, platform_wallet)` | One-time setup. |
+| `lock(seller, buyer, amount, platform_fee, secret_hash, timeout_minutes)` | Lock funds + fee in escrow. |
+| `release(trade_id, secret)` | Pay buyer `amount`, pay platform `fee`. |
+| `refund(trade_id)` | Return `amount + fee` to seller after timeout. |
+| `get_trade(trade_id)` | View trade state. |
+
+### HashedTimeLock trait — `contracts/htlc-core`
+
+Shared interface and constants used by both contracts:
+
+```rust
+pub const MIN_TIMEOUT_LEDGERS: u32 = 60;   // ~5 min
+pub const TTL_MIN: u32 = 17_280;            // ~1 day
+pub const TTL_EXTEND: u32 = 518_400;        // ~30 days
+```
 
 ---
 
-## x402 Flow
+## Agent (Claude)
 
-```
-Agent → GET /api/v1/swaps/search
-      ← 402 { challenge: { amount_usdc: "0.001", pay_to: "G...", memo: "micopay:swap_search" } }
+The intent parser lives in `apps/api/src/routes/agent.ts` and uses Claude Haiku to:
 
-Agent builds Stellar USDC payment tx, signs it
+1. Parse natural language swap intent
+2. Call real API tools (`search_swaps`, `get_reputation`, `calculate_timeouts`)
+3. Produce a structured `SwapPlan` JSON
 
-Agent → GET /api/v1/swaps/search
-        X-Payment: <signed_xdr>
-      ← 200 { counterparties: [...] }
-```
-
----
-
-## Fund Micopay
-
-The meta-demo: an agent funds the project using the same x402 infrastructure it's demonstrating.
+**Claude never executes transactions.** The SwapExecutor (`apps/agent/src/executor.ts`) follows the plan deterministically.
 
 ```bash
-curl -X POST https://api.micopay.xyz/api/v1/fund \
+# Test the agent (requires ANTHROPIC_API_KEY + credits)
+curl -X POST http://localhost:3000/api/v1/swaps/plan \
+  -H "X-Payment: mock:MYAGENT:0.01" \
+  -H "Content-Type: application/json" \
+  -d '{"intent": "swap 50 USDC for XLM, best rate", "user_address": "G..."}'
+```
+
+---
+
+## Fund Micopay — The Meta-Demo
+
+An agent funds the project using the same x402 infrastructure it's demonstrating.
+
+```bash
+# Step 1: Get challenge (no payment yet)
+curl -X POST http://localhost:3000/api/v1/fund
+
+# Step 2: Pay and fund
+curl -X POST http://localhost:3000/api/v1/fund \
   -H "X-Payment: <signed_stellar_xdr>" \
+  -H "Content-Type: application/json" \
   -d '{"message": "x402 works!"}'
 ```
 
-Response includes `stellar_expert_url` for on-chain verification.
+Response includes `stellar_expert_url` for on-chain verification. The dashboard updates live every 5 seconds.
+
+---
+
+## Security
+
+Contracts reviewed against Soroban security checklist:
+
+- ✅ All privileged functions require `require_auth()`
+- ✅ Re-initialization prevented (`has(Admin)` guard)
+- ✅ Duplicate lock prevention (checks before token transfer)
+- ✅ Typed `DataKey` enum — no storage key collisions
+- ✅ TTL extended proactively on every state change
+- ✅ `overflow-checks = true` in release profile
+- ✅ State machine prevents double-spend / double-release
+- ✅ Events emitted for all state changes (full auditability)
 
 ---
 
@@ -181,4 +251,4 @@ Response includes `stellar_expert_url` for on-chain verification.
 
 Built for **Stellar Hacks: Agents** (DoraHacks 2026) by Eric + Stichui.
 
-Built with Claude Sonnet 4.6, Soroban, Stellar SDK, Fastify, React, Turborepo.
+Built with Claude Haiku 4.5, Soroban SDK, Stellar SDK, Fastify, React, Turborepo.
