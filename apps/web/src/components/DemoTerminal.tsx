@@ -15,119 +15,133 @@ export default function DemoTerminal({ apiUrl }: Props) {
   const [step, setStep] = useState<Step>("idle");
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
+  const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
 
-  const addLog = (line: LogLine) =>
-    setLogs((prev) => [...prev, line]);
-
+  const add = (line: LogLine) => setLogs((prev) => [...prev, line]);
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const runDemo = async () => {
     setLogs([]);
+    setExplorerUrl(null);
     setRunning(true);
-    setStep("search");
 
-    // Step 1: Service discovery (free)
-    addLog({ type: "info", text: "=== Micopay Protocol Demo ===" });
-    addLog({ type: "cmd", text: `GET ${apiUrl}/api/v1/services` });
-    await sleep(600);
+    // ── Step 0: Service discovery (free) ─────────────────────────────
+    setStep("search");
+    add({ type: "info", text: "=== Micopay Protocol — Live Demo ===" });
+    add({ type: "cmd",  text: `GET ${apiUrl}/api/v1/services` });
+    await sleep(500);
     try {
-      const res = await fetch(`${apiUrl}/api/v1/services`);
+      const res  = await fetch(`${apiUrl}/api/v1/services`);
       const data = await res.json();
-      addLog({ type: "success", text: `✓ ${data.services?.length ?? 0} services available` });
-      addLog({ type: "response", text: `  payment_method: ${data.payment_method}` });
-      addLog({ type: "response", text: `  payment_asset: USDC on Stellar` });
+      add({ type: "success",  text: `✓ ${data.services?.length ?? 0} services discovered` });
+      add({ type: "response", text: `  payment_method: ${data.payment_method ?? "x402"}` });
+      add({ type: "response", text: `  network: Stellar testnet` });
     } catch {
-      addLog({ type: "error", text: "⚠ API offline — using mock responses" });
+      add({ type: "error", text: "⚠ API offline" });
     }
 
-    await sleep(500);
-
-    // Step 2: Search swaps (x402)
-    setStep("search");
-    addLog({ type: "info", text: "\n--- Step 1: Search counterparties ($0.001) ---" });
-    addLog({ type: "cmd", text: `GET ${apiUrl}/api/v1/swaps/search?sell_asset=USDC&buy_asset=XLM&amount=50` });
-    addLog({ type: "info", text: "  → 402 Payment Required" });
     await sleep(400);
-    addLog({ type: "info", text: '  → Sending X-Payment: "mock:GAGENT:0.001"' });
-    await sleep(800);
+
+    // ── Step 1: Search counterparties — real Horizon rate ─────────────
+    add({ type: "info", text: "\n--- Step 1: Search counterparties ($0.001) ---" });
+    add({ type: "cmd",  text: `GET ${apiUrl}/api/v1/swaps/search?sell_asset=USDC&buy_asset=XLM&amount=50` });
+    add({ type: "info", text: "  ← 402 Payment Required" });
+    await sleep(400);
+    add({ type: "info", text: '  → X-Payment: "mock:GAGENT:0.001"' });
+    await sleep(600);
     try {
-      const res = await fetch(`${apiUrl}/api/v1/swaps/search?sell_asset=USDC&buy_asset=XLM&amount=50`, {
+      const res  = await fetch(`${apiUrl}/api/v1/swaps/search?sell_asset=USDC&buy_asset=XLM&amount=50`, {
         headers: { "x-payment": "mock:GAGENT_DEMO:0.001" },
       });
       const data = await res.json();
-      addLog({ type: "success", text: `✓ 200 OK — ${data.counterparties?.length ?? 2} counterparties found` });
-      if (data.counterparties?.[0]) {
-        const cp = data.counterparties[0];
-        addLog({ type: "response", text: `  best: score=${cp.reputation_score} rate=${cp.rate}` });
+      const cp   = data.counterparties?.[0];
+      add({ type: "success",  text: `✓ 200 OK — ${data.total_results ?? 2} counterparties found` });
+      add({ type: "response", text: `  market_rate: ${data.market_rate} XLM/USDC  [source: ${data.rate_source ?? "horizon-testnet"}]` });
+      if (cp) {
+        add({ type: "response", text: `  best: score=${cp.reputation_score}  rate=${cp.rate}  completion=${(cp.completion_rate * 100).toFixed(0)}%` });
       }
     } catch {
-      addLog({ type: "success", text: "✓ 200 OK — 2 counterparties found (mock)" });
-      addLog({ type: "response", text: "  best: score=95 rate=1.001" });
+      add({ type: "success",  text: "✓ 200 OK — 2 counterparties (offline fallback)" });
+      add({ type: "response", text: "  market_rate: 6.12 XLM/USDC" });
     }
 
     await sleep(500);
 
-    // Step 3: Plan swap (Claude)
+    // ── Step 2: Claude plans the swap — real API call ─────────────────
     setStep("plan");
-    addLog({ type: "info", text: "\n--- Step 2: Plan swap with Claude ($0.01) ---" });
-    addLog({ type: "cmd", text: `POST ${apiUrl}/api/v1/swaps/plan` });
-    addLog({ type: "info", text: '  intent: "swap 50 USDC for XLM"' });
-    addLog({ type: "info", text: "  → Claude parsing intent..." });
-    await sleep(1200);
-    addLog({ type: "info", text: "  → Claude calling search_swaps tool..." });
-    await sleep(800);
-    addLog({ type: "info", text: "  → Claude calling get_reputation tool..." });
+    add({ type: "info", text: "\n--- Step 2: Claude plans the swap ($0.01) ---" });
+    add({ type: "cmd",  text: `POST ${apiUrl}/api/v1/swaps/plan` });
+    add({ type: "info", text: '  intent: "swap 50 USDC for XLM, best rate"' });
+    add({ type: "info", text: "  → Claude Haiku parsing intent..." });
     await sleep(600);
-    addLog({ type: "info", text: "  → Claude calling create_swap_plan..." });
-    await sleep(500);
-    addLog({ type: "success", text: "✓ SwapPlan generated" });
-    addLog({ type: "response", text: "  steps: lock → monitor → release" });
-    addLog({ type: "response", text: "  risk_level: low | estimated: 60s" });
-    addLog({ type: "response", text: "  total_fee_usd: $0.012" });
-
-    await sleep(500);
-
-    // Step 4: Fund Micopay (meta-demo)
-    setStep("fund");
-    addLog({ type: "info", text: "\n--- Step 3: Fund Micopay — the meta-demo ($0.10) ---" });
-    addLog({ type: "cmd", text: `POST ${apiUrl}/api/v1/fund` });
-    addLog({ type: "info", text: '  message: "x402 works — funding with the protocol itself"' });
-    addLog({ type: "info", text: "  → 402 Payment Required (min $0.10)" });
+    add({ type: "info", text: "  → Claude calling search_swaps tool..." });
     await sleep(400);
-    addLog({ type: "info", text: '  → Sending X-Payment: "mock:GAGENT_DEMO:0.10"' });
-    await sleep(900);
+
     try {
-      const res = await fetch(`${apiUrl}/api/v1/fund`, {
+      const res  = await fetch(`${apiUrl}/api/v1/swaps/plan`, {
         method: "POST",
-        headers: {
-          "x-payment": "mock:GAGENT_DEMO:0.10",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message: "x402 works — funding with the protocol itself" }),
+        headers: { "x-payment": "mock:GAGENT_DEMO:0.01", "Content-Type": "application/json" },
+        body: JSON.stringify({ intent: "swap 50 USDC for XLM, best rate", user_address: "GDEMOUSER1" }),
       });
       const data = await res.json();
-      addLog({ type: "success", text: `✓ 200 OK — Thank you, ${data.supporter_id}!` });
-      addLog({ type: "response", text: `  total_funded_usdc: $${data.total_funded_usdc}` });
-      addLog({ type: "response", text: `  total_supporters: ${data.total_supporters}` });
-      addLog({ type: "response", text: `  stellar_tx: ${data.stellar_tx_hash}` });
-    } catch {
-      addLog({ type: "success", text: "✓ 200 OK — Thank you, mcp-supporter-001!" });
-      addLog({ type: "response", text: "  total_funded_usdc: $10.10" });
-      addLog({ type: "response", text: "  stellar_expert_url: https://stellar.expert/..." });
+      const plan = data.plan;
+      if (plan) {
+        add({ type: "info",     text: "  → Claude calling create_swap_plan tool..." });
+        await sleep(300);
+        add({ type: "success",  text: `✓ SwapPlan generated  [agent: ${data.agent}]` });
+        add({ type: "response", text: `  sell: ${plan.amounts?.sell_amount} ${plan.amounts?.sell_asset}  →  buy: ${plan.amounts?.buy_amount} ${plan.amounts?.buy_asset}` });
+        add({ type: "response", text: `  rate: ${plan.amounts?.exchange_rate}  risk: ${plan.risk_level}  eta: ${plan.estimated_time_seconds}s` });
+        add({ type: "response", text: `  steps: lock → monitor → release` });
+      } else {
+        throw new Error(data.error ?? "no plan");
+      }
+    } catch (e) {
+      add({ type: "error",    text: `⚠ Claude unavailable: ${e}` });
+      add({ type: "response", text: "  (showing cached plan)" });
+      add({ type: "response", text: "  sell: 50 USDC → buy: ~306 XLM  risk: low" });
     }
 
-    addLog({ type: "info", text: "\n=== Demo complete. x402 works. ===" });
+    await sleep(500);
+
+    // ── Step 3: Fund Micopay — REAL on-chain USDC payment ────────────
+    setStep("fund");
+    add({ type: "info", text: "\n--- Step 3: Fund Micopay — real on-chain payment ($0.10 USDC) ---" });
+    add({ type: "cmd",  text: `POST ${apiUrl}/api/v1/fund/demo` });
+    add({ type: "info", text: "  → Demo agent signing Stellar USDC transaction..." });
+    await sleep(600);
+    add({ type: "info", text: "  → Submitting to Stellar testnet..." });
+
+    try {
+      const res  = await fetch(`${apiUrl}/api/v1/fund/demo`, { method: "POST" });
+      const data = await res.json();
+      if (data.stellar_tx_hash) {
+        add({ type: "success",  text: `✓ Payment confirmed on-chain!` });
+        add({ type: "response", text: `  amount: $${data.amount_usdc} USDC` });
+        add({ type: "response", text: `  from: ${data.agent_address?.slice(0,8)}...${data.agent_address?.slice(-4)}` });
+        add({ type: "response", text: `  total funded: $${data.total_funded_usdc} by ${data.total_supporters} supporter(s)` });
+        add({ type: "response", text: `  tx: ${data.stellar_tx_hash}` });
+        setExplorerUrl(data.stellar_expert_url);
+      } else {
+        throw new Error(data.error ?? "payment failed");
+      }
+    } catch (e) {
+      add({ type: "error", text: `✗ Payment failed: ${e}` });
+    }
+
+    add({ type: "info", text: "\n=== Demo complete. Payment IS authentication. ===" });
     setStep("done");
     setRunning(false);
   };
 
   const COLOR: Record<LogLine["type"], string> = {
-    cmd: "#60a5fa",
+    cmd:      "#60a5fa",
     response: "#9ca3af",
-    info: "#6b7280",
-    success: "#4ade80",
-    error: "#f87171",
+    info:     "#6b7280",
+    success:  "#4ade80",
+    error:    "#f87171",
   };
+
+  const STEPS = ["search", "plan", "fund", "done"] as Step[];
 
   return (
     <div>
@@ -142,7 +156,7 @@ export default function DemoTerminal({ apiUrl }: Props) {
           <div>
             <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.25rem", color: "white" }}>Demo Terminal</h2>
             <p style={{ margin: 0, fontSize: "0.75rem", color: "#6b7280" }}>
-              Full demo: service discovery → swap plan (Claude) → Fund Micopay
+              Discovery → Swap plan (Claude) → Real USDC payment on Stellar testnet
             </p>
           </div>
           <button
@@ -163,17 +177,15 @@ export default function DemoTerminal({ apiUrl }: Props) {
           </button>
         </div>
 
-        {/* Progress */}
+        {/* Progress bar */}
         {step !== "idle" && (
           <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
-            {(["search", "plan", "fund", "done"] as Step[]).map((s) => (
+            {STEPS.map((s) => (
               <div key={s} style={{
                 flex: 1,
                 height: "4px",
                 borderRadius: "2px",
-                background: (["done", "fund", "plan", "search"] as string[]).indexOf(step) >= (["done", "fund", "plan", "search"] as string[]).indexOf(s)
-                  ? "#4ade80"
-                  : "#1f2937",
+                background: STEPS.indexOf(step) >= STEPS.indexOf(s) ? "#4ade80" : "#1f2937",
                 transition: "background 0.3s",
               }} />
             ))}
@@ -204,6 +216,19 @@ export default function DemoTerminal({ apiUrl }: Props) {
           )}
           {running && <span style={{ color: "#4ade80" }}>▋</span>}
         </div>
+
+        {/* Stellar Expert link when done */}
+        {explorerUrl && (
+          <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "#052e16", borderRadius: "0.375rem", border: "1px solid #15803d" }}>
+            <span style={{ color: "#4ade80", fontSize: "0.8rem", fontFamily: "monospace" }}>
+              ✓ Verified on-chain:{" "}
+              <a href={explorerUrl} target="_blank" rel="noopener noreferrer"
+                style={{ color: "#60a5fa", textDecoration: "underline" }}>
+                stellar.expert →
+              </a>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

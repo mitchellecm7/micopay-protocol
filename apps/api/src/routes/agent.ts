@@ -24,6 +24,11 @@ contrato HTLC en testnet para el demo).
 ## Assets soportados
 - Stellar: USDC, XLM, MXNe
 
+## Tasas de mercado (SIEMPRE usa el rate que devuelve search_swaps — viene de Horizon en tiempo real)
+El campo "rate" en los counterparties es cuántos buy_asset recibes por cada sell_asset.
+buy_amount = sell_amount × rate
+Ejemplo: sell 50 USDC, rate = 6.12 → buy_amount = "306.0" XLM
+
 ## Flujo de un atomic swap
 1. Initiator bloquea en Stellar con secret_hash = sha256(secret)
 2. Counterparty bloquea con el mismo secret_hash
