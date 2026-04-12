@@ -10,7 +10,7 @@
 
 MicoPay is two things that work together:
 
-**1. A mobile P2P app** — already live on Stellar testnet. Users cashout USDC to MXN cash through local merchants (pharmacies, tiendas). Invest in tokenized CETES at 11.45% APY. Borrow against crypto collateral via Blend. Bank on/off ramp via Etherfuse. No bank account required.
+**1. A mobile P2P app** — already live on Stellar testnet. Users cashout USDC to MXN cash through local merchants (pharmacies, tiendas). The app also includes UI screens for CETES bonds (Etherfuse), Blend DeFi (borrow/yield), and bank on-ramp — mainnet-ready architecture, simulated on testnet. No bank account required.
 
 **2. An x402 Protocol API** — built for this hackathon. Exposes the merchant network and HTLC engine to any AI agent via HTTP + micropayments. Claude, GPT, a Telegram bot, or a WhatsApp assistant can now do what MicoPay users do — in a single API call.
 
@@ -190,7 +190,7 @@ Agent → POST /api/v1/cash/request
 │   lock()            │      │   /claim/:id → ClaimQR      │
 │   release() ← QR   │      │   /cashout  → P2P flow      │
 │   refund()          │      │   /explore  → DeFi products  │
-│   deployed testnet  │      │   CETES 11.45% · Blend · ETH │
+│   deployed testnet  │      │   CETES · Blend · bank ramp  │
 └─────────────────────┘      └─────────────────────────────┘
               │
               ▼
@@ -232,7 +232,7 @@ micopay-mvp/
 │   │       ├── QRReveal.tsx    # HTLC QR reveal + on-chain release
 │   │       ├── ClaimQR.tsx     # Standalone QR page — accessible from any agent
 │   │       ├── Explore.tsx     # DeFi product discovery
-│   │       ├── CETESScreen.tsx # Tokenized bonds (11.45% APY, Etherfuse)
+│   │       ├── CETESScreen.tsx # Tokenized bonds UI (Etherfuse, testnet simulation)
 │   │       └── BlendScreen.tsx # Borrow / yield (Blend Protocol)
 │   └── contracts/
 │       └── escrow/             # MicoPay escrow contract v0.1, 5 tests
