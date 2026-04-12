@@ -101,7 +101,6 @@ async function buildCounterparties(sell: string, buy: string, amount?: string): 
     {
       address: "GDEMOSWAP1XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
       chain: "stellar",
-      reputation_score: 95,
       completion_rate: 0.98,
       avg_time_seconds: 45,
       available_amount: "10000",
@@ -110,7 +109,6 @@ async function buildCounterparties(sell: string, buy: string, amount?: string): 
     {
       address: "GDEMOSWAP2XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
       chain: "stellar",
-      reputation_score: 87,
       completion_rate: 0.94,
       avg_time_seconds: 62,
       available_amount: "5000",

@@ -34,21 +34,6 @@ export const SWAP_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "get_reputation",
-    description:
-      "Consulta reputación on-chain de una address. Devuelve score (0-100), tier, y completion_rate.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        address: {
-          type: "string",
-          description: "Stellar address (G...)",
-        },
-      },
-      required: ["address"],
-    },
-  },
-  {
     name: "calculate_timeouts",
     description:
       "Calcula timeouts óptimos en ledgers para un swap. initiator_ledgers siempre > counterparty_ledgers.",
@@ -71,7 +56,6 @@ export const SWAP_TOOLS: Anthropic.Tool[] = [
       properties: {
         counterparty_address: { type: "string" },
         counterparty_chain: { type: "string" },
-        counterparty_reputation_score: { type: "number" },
         sell_asset: { type: "string" },
         sell_amount: { type: "string" },
         buy_asset: { type: "string" },
@@ -119,15 +103,6 @@ export async function executeTool(
           amount: String(toolInput.amount ?? "0"),
         });
         const res = await fetch(`${API_BASE}/api/v1/swaps/search?${params}`, {
-          headers: { "x-payment": AGENT_PAYMENT_HEADER },
-        });
-        const data = await res.json();
-        return JSON.stringify(data);
-      }
-
-      case "get_reputation": {
-        const address = String(toolInput.address);
-        const res = await fetch(`${API_BASE}/api/v1/reputation/${address}`, {
           headers: { "x-payment": AGENT_PAYMENT_HEADER },
         });
         const data = await res.json();

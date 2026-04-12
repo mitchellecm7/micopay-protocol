@@ -46,6 +46,10 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev_jwt_secret',
   jwtExpiry: process.env.JWT_EXPIRY || '24h',
 
+  // DeFi integrations
+  cetesIssuer: process.env.CETES_ISSUER || 'GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC',
+  blendPoolId: process.env.BLEND_POOL_ID || 'CB5UDFTJ6VFOK63ZHQASNODV4PP2HVGPYRF754LRGO7YRG5SFCAZWTDD',
+
   // MVP flags
   mockStellar: process.env.MOCK_STELLAR === 'true',
 } as const;

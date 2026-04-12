@@ -27,7 +27,16 @@
       "Bash(~/.cargo/bin/stellar --version)",
       "Bash(npm show:*)",
       "Bash(pkill:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(netstat:*)",
+      "Bash(sort -t: -k2 -n)",
+      "Bash(sc query:*)",
+      "Bash(head:*)",
+      "Bash(echo:*)",
+      "Bash(cargo test:*)",
+      "Bash(echo checking differently:*)",
+      "Bash(python3:*)",
+      "Bash(cargo build:*)"
     ]
   }
 }

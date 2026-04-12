@@ -6,6 +6,7 @@ import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { tradeRoutes } from './routes/trades.js';
 import { stellarRoutes } from './routes/stellar.js';
+import { defiRoutes } from './routes/defi.js';
 import { AppError } from './utils/errors.js';
 import { Keypair } from '@stellar/stellar-sdk';
 
@@ -105,6 +106,7 @@ app.register(authRoutes, { prefix: '' });
 app.register(userRoutes, { prefix: '' });
 app.register(tradeRoutes, { prefix: '' });
 app.register(stellarRoutes, { prefix: '' });
+app.register(defiRoutes, { prefix: '' });
 
 // --- Start server ---
 

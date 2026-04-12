@@ -95,3 +95,88 @@ export async function getAccountBalance(): Promise<{ xlm: string; address: strin
   const res = await http.get('/account/balance');
   return res.data;
 }
+
+// ─── DeFi: CETES ──────────────────────────────────────────────────────────
+
+export interface CETESRate {
+  apy: number;
+  xlmPerUsdc: number;
+  cetesIssuer: string;
+  cesPriceMxn: number;
+  network: string;
+  note: string;
+}
+
+export interface CETESTxResult {
+  hash: string;
+  status: string;
+  simulated: boolean;
+  amount: string;
+  sourceAsset?: string;
+  cetesReceived?: string;
+  destReceived?: string;
+  explorerUrl: string;
+  note?: string;
+}
+
+export async function getCETESRate(amount = '100'): Promise<CETESRate> {
+  const res = await http.get(`/defi/cetes/rate?amount=${amount}`);
+  return res.data;
+}
+
+export async function buyCETES(amount: string, sourceAsset: 'XLM' | 'USDC' | 'MXNe'): Promise<CETESTxResult> {
+  const res = await http.post('/defi/cetes/buy', { amount, sourceAsset });
+  return res.data;
+}
+
+export async function sellCETES(amount: string, destAsset: 'XLM' | 'USDC' | 'MXNe'): Promise<CETESTxResult> {
+  const res = await http.post('/defi/cetes/sell', { amount, destAsset });
+  return res.data;
+}
+
+// ─── DeFi: Blend ──────────────────────────────────────────────────────────
+
+export interface BlendPoolAsset {
+  code: string;
+  supplyApy: number;
+  borrowApy: number;
+  liquidity: number;
+}
+
+export interface BlendPool {
+  id: string;
+  name: string;
+  tvl: number;
+  assets: BlendPoolAsset[];
+}
+
+export interface BlendPoolsResponse {
+  pools: BlendPool[];
+  network: string;
+  simulated: boolean;
+}
+
+export interface BlendTxResult {
+  hash: string;
+  status: string;
+  simulated: boolean;
+  amount: string;
+  asset: string;
+  explorerUrl: string;
+  note?: string;
+}
+
+export async function getBlendPools(): Promise<BlendPoolsResponse> {
+  const res = await http.get('/defi/blend/pools');
+  return res.data;
+}
+
+export async function blendSupply(amount: string, asset: string, collateral = false): Promise<BlendTxResult> {
+  const res = await http.post('/defi/blend/supply', { amount, asset, collateral });
+  return res.data;
+}
+
+export async function blendBorrow(amount: string, asset: string): Promise<BlendTxResult> {
+  const res = await http.post('/defi/blend/borrow', { amount, asset });
+  return res.data;
+}

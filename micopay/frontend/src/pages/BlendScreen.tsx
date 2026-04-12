@@ -1,0 +1,428 @@
+import { useState, useEffect } from 'react';
+import {
+  getBlendPools,
+  blendSupply,
+  blendBorrow,
+  BlendPool,
+  BlendTxResult,
+} from '../services/api';
+
+interface BlendScreenProps {
+  onBack: () => void;
+  userToken?: string;
+}
+
+type MainTab = 'loan' | 'yield';
+
+const BlendScreen = ({ onBack }: BlendScreenProps) => {
+  const [tab, setTab] = useState<MainTab>('loan');
+  const [pools, setPools] = useState<BlendPool[]>([]);
+  const [poolsLoading, setPoolsLoading] = useState(true);
+
+  // Loan tab state
+  const [collateralAmount, setCollateralAmount] = useState('');
+  const [collateralLoading, setCollateralLoading] = useState(false);
+  const [collateralResult, setCollateralResult] = useState<BlendTxResult | null>(null);
+  const [borrowAmount, setBorrowAmount] = useState('');
+  const [borrowAsset, setBorrowAsset] = useState<'USDC' | 'MXNe'>('MXNe');
+  const [borrowLoading, setBorrowLoading] = useState(false);
+  const [borrowResult, setBorrowResult] = useState<BlendTxResult | null>(null);
+
+  // Yield tab state
+  const [supplyAmount, setSupplyAmount] = useState('');
+  const [supplyAsset, setSupplyAsset] = useState('XLM');
+  const [supplyLoading, setSupplyLoading] = useState(false);
+  const [supplyResult, setSupplyResult] = useState<BlendTxResult | null>(null);
+
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getBlendPools()
+      .then((data) => setPools(data.pools))
+      .catch(() => {})
+      .finally(() => setPoolsLoading(false));
+  }, []);
+
+  const mainPool = pools[0] ?? null;
+
+  // Health factor mock: if no collateral deposited, show 0
+  const xlmCollateral = collateralResult ? parseFloat(collateralResult.amount) : 0;
+  const maxBorrow = xlmCollateral * 0.7 * 0.058; // 70% LTV, ~$0.058 per XLM in USDC
+  const maxBorrowMxn = maxBorrow * 17.5;
+  const healthFactor = borrowResult
+    ? (xlmCollateral * 0.058 * 1.1) / (parseFloat(borrowResult.amount) * (borrowAsset === 'MXNe' ? 0.057 : 1))
+    : 999;
+
+  const handleCollateral = async () => {
+    if (!collateralAmount || parseFloat(collateralAmount) <= 0) return;
+    setCollateralLoading(true);
+    setError(null);
+    try {
+      const result = await blendSupply(collateralAmount, 'XLM', true);
+      setCollateralResult(result);
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? err.message ?? 'Error');
+    } finally {
+      setCollateralLoading(false);
+    }
+  };
+
+  const handleBorrow = async () => {
+    if (!borrowAmount || parseFloat(borrowAmount) <= 0) return;
+    setBorrowLoading(true);
+    setError(null);
+    try {
+      const result = await blendBorrow(borrowAmount, borrowAsset);
+      setBorrowResult(result);
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? err.message ?? 'Error');
+    } finally {
+      setBorrowLoading(false);
+    }
+  };
+
+  const handleSupply = async () => {
+    if (!supplyAmount || parseFloat(supplyAmount) <= 0) return;
+    setSupplyLoading(true);
+    setError(null);
+    try {
+      const result = await blendSupply(supplyAmount, supplyAsset, false);
+      setSupplyResult(result);
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? err.message ?? 'Error');
+    } finally {
+      setSupplyLoading(false);
+    }
+  };
+
+  const shortHash = (h: string) => (h.length > 16 ? `${h.slice(0, 8)}…${h.slice(-8)}` : h);
+
+  const TxCard = ({ result }: { result: BlendTxResult }) => (
+    <div className="bg-[#e6f9f1] border border-[#1D9E75]/20 rounded-2xl px-4 py-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="material-symbols-outlined text-[#1D9E75] text-xl">check_circle</span>
+        <p className="font-bold text-[#1D9E75]">
+          {result.simulated ? '¡Demo exitoso!' : '¡Tx enviada!'}
+        </p>
+      </div>
+      <p className="text-xs text-on-surface-variant font-mono">{shortHash(result.hash)}</p>
+      <a
+        href={result.explorerUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-1 text-xs text-primary font-bold"
+      >
+        Ver en Stellar Explorer
+        <span className="material-symbols-outlined text-sm">open_in_new</span>
+      </a>
+    </div>
+  );
+
+  return (
+    <div className="bg-surface text-on-surface font-body min-h-screen flex flex-col pb-10">
+      {/* Header */}
+      <header className="fixed top-0 left-0 w-full z-50 flex items-center gap-4 px-4 py-4 backdrop-blur-md bg-white/90 border-b border-outline-variant/10">
+        <button
+          onClick={onBack}
+          className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container-low transition-colors"
+        >
+          <span className="material-symbols-outlined">arrow_back</span>
+        </button>
+        <div>
+          <h1 className="font-headline font-bold text-lg leading-tight">Blend Capital</h1>
+          <p className="text-[11px] text-on-surface-variant">Protocolo DeFi en Stellar</p>
+        </div>
+        <div className="ml-auto bg-on-surface/5 border border-outline-variant/20 rounded-full px-3 py-1">
+          <span className="text-on-surface font-bold text-xs">
+            TVL ${((mainPool?.tvl ?? 2_450_000) / 1_000_000).toFixed(2)}M
+          </span>
+        </div>
+      </header>
+
+      <main className="flex-1 mt-20 px-4 pt-4 space-y-5">
+        {/* Main tabs */}
+        <div className="flex gap-2 bg-surface-container-low rounded-2xl p-1">
+          <button
+            onClick={() => { setTab('loan'); setError(null); }}
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${
+              tab === 'loan' ? 'bg-white text-on-surface shadow-sm' : 'text-on-surface-variant'
+            }`}
+          >
+            Préstamo
+          </button>
+          <button
+            onClick={() => { setTab('yield'); setError(null); }}
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${
+              tab === 'yield' ? 'bg-white text-primary shadow-sm' : 'text-on-surface-variant'
+            }`}
+          >
+            Rendimiento
+          </button>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="bg-error/10 border border-error/20 rounded-2xl px-4 py-3">
+            <p className="text-sm text-error font-medium">{error}</p>
+          </div>
+        )}
+
+        {/* ── LOAN TAB ── */}
+        {tab === 'loan' && (
+          <div className="space-y-4">
+            {/* Step 1: Deposit collateral */}
+            <div className="bg-white rounded-[24px] p-5 border border-outline-variant/10 shadow-sm space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-white font-bold text-sm">1</span>
+                </div>
+                <div>
+                  <p className="font-bold text-on-surface">Depositar garantía</p>
+                  <p className="text-xs text-on-surface-variant">Usa XLM como colateral</p>
+                </div>
+                {collateralResult && (
+                  <div className="ml-auto bg-[#1D9E75]/10 rounded-full px-2 py-1">
+                    <p className="text-xs font-bold text-[#1D9E75]">
+                      {collateralResult.amount} XLM
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-on-surface-variant mb-2 uppercase tracking-wide">
+                  Cantidad XLM
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="0.00"
+                  value={collateralAmount}
+                  onChange={(e) => setCollateralAmount(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-2xl px-4 py-3 text-xl font-bold focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+
+              {collateralAmount && parseFloat(collateralAmount) > 0 && (
+                <div className="bg-primary/5 rounded-2xl px-4 py-2 flex justify-between">
+                  <span className="text-xs text-on-surface-variant">Capacidad de préstamo</span>
+                  <span className="text-xs font-bold text-on-surface">
+                    ~${(parseFloat(collateralAmount) * 0.058 * 0.7).toFixed(2)} USDC
+                  </span>
+                </div>
+              )}
+
+              {collateralResult && <TxCard result={collateralResult} />}
+
+              <button
+                onClick={handleCollateral}
+                disabled={collateralLoading || !collateralAmount || parseFloat(collateralAmount) <= 0}
+                className="w-full bg-on-surface text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-[0.98]"
+              >
+                {collateralLoading ? (
+                  <>
+                    <span className="material-symbols-outlined animate-spin text-lg">progress_activity</span>
+                    Procesando…
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-lg">lock</span>
+                    Depositar XLM como garantía
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Step 2: Borrow */}
+            <div className="bg-white rounded-[24px] p-5 border border-outline-variant/10 shadow-sm space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${collateralResult ? 'bg-primary' : 'bg-outline'}`}>
+                  <span className="text-white font-bold text-sm">2</span>
+                </div>
+                <div>
+                  <p className="font-bold text-on-surface">Pedir prestado</p>
+                  <p className="text-xs text-on-surface-variant">
+                    {collateralResult
+                      ? `Máx ~${borrowAsset === 'MXNe' ? maxBorrowMxn.toFixed(0) : maxBorrow.toFixed(2)} ${borrowAsset}`
+                      : 'Deposita garantía primero'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Asset selector */}
+              <div className="flex gap-2">
+                {(['MXNe', 'USDC'] as const).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setBorrowAsset(a)}
+                    className={`flex-1 py-2 rounded-xl font-bold text-sm border transition-all ${
+                      borrowAsset === a
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-on-surface-variant border-outline-variant/30'
+                    }`}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="number"
+                min="0"
+                step="any"
+                placeholder="0.00"
+                value={borrowAmount}
+                onChange={(e) => setBorrowAmount(e.target.value)}
+                disabled={!collateralResult}
+                className="w-full bg-surface-container-low border border-outline-variant/20 rounded-2xl px-4 py-3 text-xl font-bold focus:outline-none focus:border-primary transition-colors disabled:opacity-40"
+              />
+
+              {/* Health factor */}
+              {collateralResult && borrowAmount && parseFloat(borrowAmount) > 0 && (
+                <div className="bg-surface-container-low rounded-2xl px-4 py-2 flex justify-between">
+                  <span className="text-xs text-on-surface-variant">Health Factor</span>
+                  <span className={`text-xs font-bold ${healthFactor > 1.5 ? 'text-[#1D9E75]' : healthFactor > 1.0 ? 'text-warning' : 'text-error'}`}>
+                    {healthFactor > 99 ? '∞' : healthFactor.toFixed(2)}
+                  </span>
+                </div>
+              )}
+
+              {borrowResult && <TxCard result={borrowResult} />}
+
+              <button
+                onClick={handleBorrow}
+                disabled={borrowLoading || !borrowAmount || parseFloat(borrowAmount) <= 0 || !collateralResult}
+                className="w-full bg-primary text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-[0.98]"
+              >
+                {borrowLoading ? (
+                  <>
+                    <span className="material-symbols-outlined animate-spin text-lg">progress_activity</span>
+                    Procesando…
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-lg">payments</span>
+                    Pedir prestado
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── YIELD TAB ── */}
+        {tab === 'yield' && (
+          <div className="space-y-4">
+            {/* Pool cards */}
+            {poolsLoading ? (
+              <div className="flex justify-center py-8">
+                <span className="material-symbols-outlined animate-spin text-primary text-3xl">progress_activity</span>
+              </div>
+            ) : mainPool ? (
+              <div className="space-y-3">
+                {mainPool.assets.map((asset) => (
+                  <div
+                    key={asset.code}
+                    className="bg-white rounded-[20px] p-4 border border-outline-variant/10 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center">
+                          <span className="material-symbols-outlined text-primary text-lg">
+                            {asset.code === 'XLM' ? 'star' : asset.code === 'USDC' ? 'attach_money' : 'currency_peso'}
+                          </span>
+                        </div>
+                        <p className="font-bold text-on-surface">{asset.code}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-extrabold text-primary text-lg">{asset.supplyApy}%</p>
+                        <p className="text-[10px] text-on-surface-variant">APY supply</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs text-on-surface-variant">
+                      <span>Préstamo: <strong className="text-on-surface">{asset.borrowApy}%</strong></span>
+                      <span>Liquidez: <strong className="text-on-surface">${(asset.liquidity / 1000).toFixed(0)}K</strong></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center text-on-surface-variant text-sm py-8">No hay pools disponibles</p>
+            )}
+
+            {/* Supply form */}
+            <div className="bg-white rounded-[24px] p-5 border border-outline-variant/10 shadow-sm space-y-4">
+              <p className="font-bold text-on-surface">Depositar para ganar</p>
+
+              {/* Asset selector */}
+              <div className="flex gap-2">
+                {(['XLM', 'USDC', 'MXNe'] as const).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setSupplyAsset(a)}
+                    className={`flex-1 py-2 rounded-xl font-bold text-sm border transition-all ${
+                      supplyAsset === a
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-on-surface-variant border-outline-variant/30'
+                    }`}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="number"
+                min="0"
+                step="any"
+                placeholder="0.00"
+                value={supplyAmount}
+                onChange={(e) => setSupplyAmount(e.target.value)}
+                className="w-full bg-surface-container-low border border-outline-variant/20 rounded-2xl px-4 py-3 text-xl font-bold focus:outline-none focus:border-primary transition-colors"
+              />
+
+              {supplyAmount && parseFloat(supplyAmount) > 0 && mainPool && (
+                <div className="bg-primary/5 rounded-2xl px-4 py-2">
+                  <p className="text-xs text-on-surface-variant">
+                    Ganarás ~{(
+                      (parseFloat(supplyAmount) *
+                        (mainPool.assets.find((a) => a.code === supplyAsset)?.supplyApy ?? 4)) /
+                      100
+                    ).toFixed(4)} {supplyAsset} / año
+                  </p>
+                </div>
+              )}
+
+              {supplyResult && <TxCard result={supplyResult} />}
+
+              <button
+                onClick={handleSupply}
+                disabled={supplyLoading || !supplyAmount || parseFloat(supplyAmount) <= 0}
+                className="w-full bg-primary text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-[0.98]"
+              >
+                {supplyLoading ? (
+                  <>
+                    <span className="material-symbols-outlined animate-spin text-lg">progress_activity</span>
+                    Procesando…
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-lg">savings</span>
+                    Depositar y ganar
+                  </>
+                )}
+              </button>
+            </div>
+
+            <p className="text-center text-xs text-outline pb-4">
+              Blend Capital · Stellar Testnet · Las tasas son orientativas
+            </p>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};
+
+export default BlendScreen;

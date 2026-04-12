@@ -18,13 +18,13 @@ contrato HTLC en testnet para el demo).
 ## Reglas estrictas
 
 1. SIEMPRE usa las tools para consultar estado real antes de planificar.
-   Nunca asumas precios, disponibilidad, o reputación.
+   Nunca asumas precios o disponibilidad.
 2. El plan debe ser un JSON ejecutable — no una descripción en prosa.
 3. Si no hay contrapartes disponibles, responde con un error claro.
 4. El timeout del initiator SIEMPRE debe ser mayor al del counterparty.
    Regla mínima: initiator_ledgers = counterparty_ledgers * 2
 5. Incluye siempre el fee total estimado en el plan.
-6. risk_level = "high" si reputation_score < 70 o completion_rate < 0.85.
+6. risk_level = "high" si completion_rate < 0.85.
 
 ## Assets soportados
 - Stellar: USDC, XLM, MXNe
@@ -58,17 +58,6 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "get_reputation",
-    description: "Consulta reputación on-chain de una address Stellar.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        address: { type: "string" },
-      },
-      required: ["address"],
-    },
-  },
-  {
     name: "calculate_timeouts",
     description: "Calcula timeouts óptimos en ledgers. initiator siempre > counterparty.",
     input_schema: {
@@ -89,7 +78,6 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         counterparty_address: { type: "string" },
         counterparty_chain: { type: "string" },
-        counterparty_reputation_score: { type: "number" },
         sell_asset: { type: "string" },
         sell_amount: { type: "string" },
         buy_asset: { type: "string" },
@@ -125,12 +113,6 @@ async function executeTool(
           amount: String(input.amount ?? "0"),
         });
         const res = await fetch(`${apiBase}/api/v1/swaps/search?${params}`, {
-          headers: { "x-payment": paymentHeader },
-        });
-        return JSON.stringify(await res.json());
-      }
-      case "get_reputation": {
-        const res = await fetch(`${apiBase}/api/v1/reputation/${input.address}`, {
           headers: { "x-payment": paymentHeader },
         });
         return JSON.stringify(await res.json());
@@ -211,7 +193,7 @@ async function planSwap(
       { order: 2, action: "monitor", chain: String(finalPlan.counterparty_chain ?? "stellar"), contract: "atomic_swap", params: { timeout_ledgers: finalPlan.counterparty_ledgers }, depends_on: 1 },
       { order: 3, action: "release", chain: String(finalPlan.counterparty_chain ?? "stellar"), contract: "atomic_swap", params: { buy_asset: finalPlan.buy_asset, buy_amount: finalPlan.buy_amount }, depends_on: 2 },
     ],
-    counterparty: { address: finalPlan.counterparty_address, chain: finalPlan.counterparty_chain ?? "stellar", reputation_score: finalPlan.counterparty_reputation_score ?? 80 },
+    counterparty: { address: finalPlan.counterparty_address, chain: finalPlan.counterparty_chain ?? "stellar" },
     amounts: { sell_asset: finalPlan.sell_asset, sell_amount: finalPlan.sell_amount, buy_asset: finalPlan.buy_asset, buy_amount: finalPlan.buy_amount, exchange_rate: finalPlan.exchange_rate ?? "1.0" },
     timeouts: { initiator_ledgers: initiator, counterparty_ledgers: finalPlan.counterparty_ledgers },
     fees: { gas_chain_a: "0.001", gas_chain_b: "0.001", service_fee: "0.01", total_usd: finalPlan.total_fee_usd ?? "0.012" },

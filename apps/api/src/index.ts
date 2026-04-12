@@ -6,6 +6,7 @@ import { reputationRoutes } from "./routes/reputation.js";
 import { fundRoutes } from "./routes/fund.js";
 import { serviceRoutes } from "./routes/services.js";
 import { demoRoutes } from "./routes/demo.js";
+import { bazaarRoutes } from "./routes/bazaar.js";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const NODE_ENV = process.env.NODE_ENV ?? "development";
@@ -53,6 +54,7 @@ app.register(reputationRoutes);
 app.register(fundRoutes);
 app.register(serviceRoutes);
 app.register(demoRoutes);
+app.register(bazaarRoutes);
 
 // --- Start ---
 async function start() {

@@ -2,9 +2,10 @@ import { Logo } from '../components/Logo';
 
 interface ExploreProps {
     onBack?: () => void;
+    onNavigate?: (page: string) => void;
 }
 
-const Explore = ({ onBack }: ExploreProps) => {
+const Explore = ({ onBack, onNavigate }: ExploreProps) => {
     return (
         <div className="bg-surface text-on-surface font-body min-h-screen flex flex-col pb-32">
             {/* Header */}
@@ -44,7 +45,9 @@ const Explore = ({ onBack }: ExploreProps) => {
                         <p className="text-sm text-on-surface-variant leading-relaxed mb-6">
                             Regístrate y empieza a ganar **11.45% anual** con Cetes tokenizados. Tu dinero trabaja por ti con el respaldo del Gobierno de México.
                         </p>
-                        <button className="w-full bg-primary text-white font-bold py-3 px-6 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20">
+                        <button
+                            onClick={() => onNavigate?.('cetes')}
+                            className="w-full bg-primary text-white font-bold py-3 px-6 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20">
                             Empezar a ahorrar
                             <span className="material-symbols-outlined text-sm">arrow_forward</span>
                         </button>
@@ -64,7 +67,9 @@ const Explore = ({ onBack }: ExploreProps) => {
                         <p className="text-sm text-on-surface-variant leading-relaxed mb-6">
                             ¿Necesitas efectivo? Usa tus criptos como garantía y recibe un préstamo digital al instante sin papeleo.
                         </p>
-                        <button className="w-full border-2 border-primary text-primary font-bold py-3 px-6 rounded-2xl flex items-center justify-center gap-2">
+                        <button
+                            onClick={() => onNavigate?.('blend')}
+                            className="w-full border-2 border-primary text-primary font-bold py-3 px-6 rounded-2xl flex items-center justify-center gap-2">
                             Ver cuánto puedo pedir
                             <span className="material-symbols-outlined text-sm">info</span>
                         </button>

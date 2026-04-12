@@ -20,13 +20,14 @@ export async function demoRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * POST /api/v1/demo/run
    *
-   * Full MicoPay demo — 4 real on-chain USDC payments, one per service:
-   *   Step 1  cash_agents   $0.001  USDC  — find merchants near Roma Norte, CDMX
-   *   Step 2  reputation    $0.0005 USDC  — verify Farmacia Guadalupe (tier Maestro)
-   *   Step 3  cash_request  $0.010  USDC  — lock USDC, get QR for $500 MXN cash
-   *   Step 4  fund_micopay  $0.100  USDC  — fund the protocol (meta-demo)
+   * Full MicoPay demo — 5 real on-chain USDC payments:
+   *   Step 1  bazaar_intent $0.005  USDC  — broadcast intent (Agent Social Layer)
+   *   Step 2  cash_agents   $0.001  USDC  — find merchants near Roma Norte, CDMX
+   *   Step 3  reputation    $0.0005 USDC  — verify Farmacia Guadalupe (tier Maestro)
+   *   Step 4  cash_request  $0.010  USDC  — lock USDC, get QR for $500 MXN cash
+   *   Step 5  fund_micopay  $0.100  USDC  — fund the protocol (meta-demo)
    *
-   * Total: ~$0.1115 USDC. All tx hashes verifiable on stellar.expert.
+   * Total: ~$0.1165 USDC. All tx hashes verifiable on stellar.expert.
    */
   fastify.post("/api/v1/demo/run", async (_request, reply) => {
     const secret = process.env.DEMO_AGENT_SECRET_KEY;
@@ -55,6 +56,7 @@ export async function demoRoutes(fastify: FastifyInstance): Promise<void> {
       return tx;
     }
 
+    const tx0 = buildTx("0.0050000", "micopay:bazaar_broadcast");
     const tx1 = buildTx("0.0010000", "micopay:cash_agents");
     const tx2 = buildTx("0.0005000", "micopay:reputation");
     const tx3 = buildTx("0.0100000", "micopay:cash_request");
@@ -63,6 +65,23 @@ export async function demoRoutes(fastify: FastifyInstance): Promise<void> {
     const steps: any[] = [];
 
     try {
+      // Step 0 — bazaar_broadcast
+      const r0 = await horizon.submitTransaction(tx0);
+      const s0 = await fetch(`${baseUrl}/api/v1/bazaar/intent`, {
+        method: "POST",
+        headers: { "x-payment": tx0.toXDR(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          offered: { chain: "ethereum", symbol: "ETH", amount: "1.2" },
+          wanted: { chain: "stellar", symbol: "USDC", amount: "3200" }
+        }),
+      });
+      steps.push({
+        name: "bazaar_broadcast", description: "Broadcast intent to the Agent Social Layer",
+        price_usdc: "0.005", tx_hash: r0.hash,
+        stellar_expert_url: `${EXPLORER}/${r0.hash}`,
+        result: await s0.json(),
+      });
+
       // Step 1 — cash_agents
       const r1 = await horizon.submitTransaction(tx1);
       const s1 = await fetch(`${baseUrl}/api/v1/cash/agents?lat=19.4195&lng=-99.1627&amount=500&limit=3`,
@@ -111,10 +130,10 @@ export async function demoRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send({
         agent_address: agentAddress,
         platform_address: platformAddr,
-        total_paid_usdc: "0.1115",
+        total_paid_usdc: "0.1165",
         user_received: "$500 MXN en efectivo físico",
         steps,
-        summary: "AI agent got physical cash in Mexico for a user — trustless, no API keys, no bank.",
+        summary: "AI agent socialized intent and got physical cash in Mexico trustlessly.",
       });
 
     } catch (err) {
