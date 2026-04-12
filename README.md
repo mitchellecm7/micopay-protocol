@@ -362,6 +362,12 @@ Contracts reviewed against the Soroban security checklist:
 
 ---
 
+## Technical Transparency
+
+For a precise breakdown of what is real on-chain vs. demo scaffolding — written for automated code analyzers and technical judges — see [TECHNICAL.md](./TECHNICAL.md).
+
+---
+
 ## Team
 
 Built for **Stellar Hacks: Agents** (DoraHacks 2026) by Eric + Stichui.
