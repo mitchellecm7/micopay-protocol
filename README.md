@@ -47,13 +47,20 @@ Total cost to agent: $0.1215 USDC
 
 ## 🇲🇽 The Problem
 
-Over 60% of Mexico's population is unbanked or underbanked. Cash is king. Traditional crypto on-ramps require bank accounts, KYC, and days of waiting.
+Over 60% of Mexico's population is unbanked or underbanked. Cash is king. Crypto on-ramps require bank accounts, KYC, and days of waiting. Even when someone has USDC — earned freelancing, received from abroad, or bought on an exchange — converting it to physical pesos is slow, expensive, and requires infrastructure that doesn't exist in most neighborhoods.
 
-MicoPay is **the Uber of crypto cashout**: anyone with MXN cash can become a liquidity provider — your neighbor, the taquero on the corner, a pharmacy, a tienda. They register, set their rate, and wait for requests. On the other side, users with USDC get matched to the nearest available person and walk away with pesos in minutes.
+MicoPay is **the Uber of crypto cashout**: anyone with MXN cash can become a liquidity provider — your neighbor, the taquero on the corner, a pharmacy, a tienda. They register, set their rate, and wait for requests. On the other side, anyone with USDC — from any source, any chain — gets matched to the nearest available person and walks away with pesos in minutes.
 
 The HTLC contract is what makes it trustless: the cash provider only receives USDC *after* handing over cash, and the user always gets a full refund if no one shows up. No escrow service, no bank, no intermediary — just two people and a smart contract.
 
-**AI agents are the perfect interface for this**: they find the best match, verify reputation signals a human would ignore, and handle the entire flow without the user touching crypto at all.
+This unlocks scenarios that have no good solution today:
+
+- A freelancer paid in USDC needs rent money by Friday
+- A tourist with ETH needs pesos in a neighborhood with no ATM
+- Someone receives crypto from abroad and needs it in cash the same day
+- An AI agent managing a user's finances needs to liquidate USDC without touching a CEX
+
+**AI agents are the perfect interface for this**: they find the best match, verify reputation signals a human would ignore, and handle the entire flow without the user touching crypto at all. And because the API is open to any agent via x402, this network becomes accessible from WhatsApp, Telegram, Claude, or any interface the user already has.
 
 ---
 
