@@ -1,35 +1,27 @@
 import { useState } from "react";
 
-interface Props {
-  apiUrl: string;
-}
-
+interface Props { apiUrl: string; }
 type Phase = "idle" | "running" | "done" | "error";
-
 interface TxStep {
-  name: string;
-  description: string;
-  price_usdc: string;
-  tx_hash: string;
-  stellar_expert_url: string;
-  result: any;
+  name: string; description: string; price_usdc: string;
+  tx_hash: string; stellar_expert_url: string; result: any;
 }
-
 interface DemoResult {
-  agent_address: string;
-  platform_address: string;
-  total_paid_usdc: string;
-  steps: TxStep[];
+  agent_address: string; platform_address: string;
+  total_paid_usdc: string; user_received: string;
+  steps: TxStep[]; summary: string;
 }
+type LogLine = { type: "cmd"|"response"|"info"|"success"|"error"|"section"; text: string };
 
-type LogLine = { type: "cmd" | "response" | "info" | "success" | "error"; text: string };
-
-const COLOR: Record<LogLine["type"], string> = {
-  cmd:      "#60a5fa",
-  response: "#9ca3af",
-  info:     "#6b7280",
-  success:  "#4ade80",
-  error:    "#f87171",
+const COLOR: Record<string, string> = {
+  section: "#a78bfa", cmd: "#60a5fa", response: "#9ca3af",
+  info: "#6b7280", success: "#4ade80", error: "#f87171",
+};
+const STEPS_META: Record<string, { emoji: string; label: string }> = {
+  cash_agents:  { emoji: "📍", label: "Buscar comercios" },
+  reputation:   { emoji: "⭐", label: "Verificar reputación" },
+  cash_request: { emoji: "💵", label: "Intercambio USDC→MXN" },
+  fund_micopay: { emoji: "💚", label: "Fondear MicoPay" },
 };
 
 export default function DemoTerminal({ apiUrl }: Props) {
@@ -37,164 +29,186 @@ export default function DemoTerminal({ apiUrl }: Props) {
   const [logs,   setLogs]   = useState<LogLine[]>([]);
   const [result, setResult] = useState<DemoResult | null>(null);
 
-  const add = (line: LogLine) => setLogs((p) => [...p, line]);
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const add = (line: LogLine) => setLogs(p => [...p, line]);
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   const runDemo = async () => {
-    setLogs([]);
-    setResult(null);
-    setPhase("running");
-
-    add({ type: "info",    text: "=== Micopay Protocol — Full Demo ===" });
-    add({ type: "info",    text: "Each step pays with a real Stellar USDC transaction." });
+    setLogs([]); setResult(null); setPhase("running");
+    add({ type: "section", text: "═══ MicoPay Protocol — Demo Completo ═══" });
+    add({ type: "info",    text: 'Escenario: "Necesito $500 MXN en efectivo en la Roma, CDMX"' });
+    add({ type: "info",    text: "El agente ejecuta 4 llamadas x402, cada una con USDC real en Stellar." });
+    add({ type: "info",    text: "" });
     add({ type: "cmd",     text: `POST ${apiUrl}/api/v1/demo/run` });
     await sleep(400);
-    add({ type: "info",    text: "  → Building 3 Stellar USDC payment txs..." });
+    add({ type: "info",    text: "  → Construyendo 4 txs USDC en Stellar testnet..." });
     await sleep(300);
-    add({ type: "info",    text: "  → Submitting to testnet + calling services..." });
+    add({ type: "info",    text: "  → Firmando y enviando a Horizon..." });
 
     try {
       const res = await fetch(`${apiUrl}/api/v1/demo/run`, { method: "POST" });
       const data: DemoResult & { error?: string } = await res.json();
-
       if (!res.ok || data.error) {
         add({ type: "error", text: `✗ ${data.error ?? "Demo failed"}` });
-        setPhase("error");
-        return;
+        setPhase("error"); return;
       }
 
-      // Show step results as they arrive in the payload
       for (const step of data.steps) {
-        add({ type: "info",     text: `\n--- ${step.name} ($${step.price_usdc} USDC) ---` });
-        add({ type: "success",  text: `✓ Paid & confirmed` });
-        add({ type: "response", text: `  tx: ${step.tx_hash}` });
+        const meta = STEPS_META[step.name] ?? { emoji: "•", label: step.name };
+        await sleep(300);
+        add({ type: "section", text: `\n${meta.emoji}  PASO: ${meta.label}  ($${step.price_usdc} USDC)` });
+        add({ type: "success", text: `  ✓ Pago confirmado en Stellar testnet` });
+        add({ type: "response",text: `  tx: ${step.tx_hash}` });
 
-        if (step.name === "swap_search") {
-          const cp = step.result?.counterparties?.[0];
-          add({ type: "response", text: `  market_rate: ${step.result?.market_rate} XLM/USDC  [${step.result?.rate_source ?? "horizon"}]` });
-          if (cp) add({ type: "response", text: `  best counterparty: score=${cp.reputation_score}  rate=${cp.rate}` });
-        }
-
-        if (step.name === "swap_plan") {
-          const plan = step.result?.plan;
-          if (plan) {
-            add({ type: "response", text: `  agent: ${step.result?.agent}` });
-            add({ type: "response", text: `  sell: ${plan.amounts?.sell_amount} ${plan.amounts?.sell_asset} → buy: ${plan.amounts?.buy_amount} ${plan.amounts?.buy_asset}` });
-            add({ type: "response", text: `  rate: ${plan.amounts?.exchange_rate}  risk: ${plan.risk_level}` });
+        if (step.name === "cash_agents") {
+          const agents = step.result?.agents ?? [];
+          add({ type: "info",    text: `  tasa: ${step.result?.usdc_mxn_rate?.toFixed(2)} MXN/USDC · comercios: ${agents.length}` });
+          if (agents[0]) {
+            add({ type: "response", text: `  ★ ${agents[0].name} (${agents[0].distance_km}km, tier ${agents[0].tier})` });
+            add({ type: "response", text: `    ${agents[0].address}` });
+            add({ type: "response", text: `    $${agents[0].available_mxn} MXN disponibles · ${(agents[0].completion_rate*100).toFixed(0)}% completion` });
           }
         }
-
+        if (step.name === "reputation") {
+          const rep = step.result?.reputation;
+          const sig = step.result?.agent_signal;
+          if (rep) {
+            add({ type: "response",text: `  ${rep.tier_emoji} ${rep.tier} · ${rep.completion_percent} · ${rep.trades_completed} trades · avg ${rep.avg_time_minutes}min` });
+            if (rep.nft_soulbound) add({ type: "success", text: `  NFT: ${rep.nft_soulbound.token_id} (no transferible)` });
+          }
+          if (sig) add({ type: sig.trusted ? "success" : "error", text: `  → ${sig.recommendation}` });
+        }
+        if (step.name === "cash_request") {
+          const r = step.result;
+          if (r?.exchange) {
+            add({ type: "response",text: `  $${r.exchange.amount_mxn} MXN = ${r.exchange.amount_usdc} USDC` });
+            add({ type: "success", text: `  HTLC locked: ${r.exchange.htlc_tx_hash?.slice(0,24)}...` });
+            add({ type: "success", text: `  "${r.instructions?.slice(0,90)}..."` });
+          }
+        }
         if (step.name === "fund_micopay") {
-          add({ type: "response", text: `  ${step.result?.message}` });
+          add({ type: "success", text: `  El protocolo se financia a sí mismo. ✓` });
         }
       }
 
-      add({ type: "info",    text: `\n  Agent:    ${data.agent_address.slice(0,8)}...${data.agent_address.slice(-6)}` });
-      add({ type: "info",    text: `  Platform: ${data.platform_address.slice(0,8)}...${data.platform_address.slice(-6)}` });
-      add({ type: "success", text: `\n✓ Total paid: $${data.total_paid_usdc} USDC — 3 real txs on Stellar testnet.` });
-      add({ type: "info",    text: "=== Payment IS authentication. ===" });
-
-      setResult(data);
-      setPhase("done");
-    } catch (err) {
-      add({ type: "error", text: `✗ ${err}` });
+      await sleep(200);
+      add({ type: "info",    text: "" });
+      add({ type: "section", text: "═══ RESULTADO ═══" });
+      add({ type: "success", text: `✓ ${data.summary}` });
+      add({ type: "response",text: `  agente pagó: $${data.total_paid_usdc} USDC → usuario recibió: ${data.user_received}` });
+      setResult(data); setPhase("done");
+    } catch (err: any) {
+      add({ type: "error", text: `✗ ${err.message ?? "Network error"}` });
       setPhase("error");
     }
   };
 
-  const box: React.CSSProperties = {
-    background: "#111827",
-    border: "1px solid #1f2937",
-    borderRadius: "0.5rem",
-    padding: "1.5rem",
-    marginBottom: "1rem",
-  };
+  const reset = () => { setPhase("idle"); setLogs([]); setResult(null); };
 
   return (
-    <div>
-      <div style={box}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-          <div>
-            <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.25rem", color: "white" }}>Demo Terminal</h2>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "#6b7280" }}>
-              3 real USDC payments on Stellar testnet — one per service call
-            </p>
-          </div>
-          <button
-            onClick={runDemo}
-            disabled={phase === "running"}
-            style={{
-              padding: "0.5rem 1.25rem",
-              background: phase === "running" ? "#1f2937" : "#166534",
-              border: `1px solid ${phase === "running" ? "#374151" : "#15803d"}`,
-              borderRadius: "0.375rem",
-              color: phase === "running" ? "#4b5563" : "#4ade80",
-              fontSize: "0.875rem",
-              cursor: phase === "running" ? "not-allowed" : "pointer",
-              fontFamily: "monospace",
-            }}
-          >
-            {phase === "running" ? "Running..." : phase === "done" || phase === "error" ? "▶ Run Again" : "▶ Run Demo"}
-          </button>
-        </div>
-
-        {/* Terminal */}
-        <div style={{
-          background: "#0a0f1e",
-          borderRadius: "0.375rem",
-          padding: "1rem",
-          minHeight: "300px",
-          fontFamily: "monospace",
-          fontSize: "0.8rem",
-          lineHeight: "1.8",
-          overflowY: "auto",
-          maxHeight: "500px",
-        }}>
-          {logs.length === 0 ? (
-            <span style={{ color: "#374151" }}>Press "Run Demo" to start...</span>
-          ) : (
-            logs.map((line, i) => (
-              <div key={i} style={{ color: COLOR[line.type] }}>
-                {line.type === "cmd" && <span style={{ color: "#4b5563" }}>$ </span>}
-                {line.text}
-              </div>
-            ))
-          )}
-          {phase === "running" && <span style={{ color: "#4ade80" }}>▋</span>}
-        </div>
+    <div style={{ fontFamily: "monospace" }}>
+      {/* Header */}
+      <div style={{ marginBottom: "1.25rem" }}>
+        <h2 style={{ margin: "0 0 0.4rem", fontSize: "1.1rem", color: "white" }}>
+          🍄 Demo — Agente IA consigue efectivo en México
+        </h2>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "#6b7280", lineHeight: 1.5 }}>
+          El agente recibe{" "}
+          <span style={{ color: "#a78bfa" }}>"Necesito $500 MXN en efectivo en la Roma"</span>
+          {" "}y ejecuta 4 llamadas x402 con USDC real. Sin cuenta. Sin API key. Sin banco.
+        </p>
       </div>
 
-      {/* 3 tx links — shown only when done */}
-      {result && (
-        <div style={{ ...box, padding: "1.25rem" }}>
-          <p style={{ margin: "0 0 0.75rem", fontSize: "0.75rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Verified on Stellar Testnet — {result.total_paid_usdc} USDC in 3 real transactions
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {result.steps.map((step) => (
-              <div key={step.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                  <span style={{ fontSize: "0.7rem", color: "#facc15", fontFamily: "monospace" }}>${step.price_usdc}</span>
-                  <span style={{ fontSize: "0.75rem", color: "#d1d5db", fontFamily: "monospace" }}>{step.name}</span>
-                </div>
-                <a
-                  href={step.stellar_expert_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: "0.7rem", color: "#60a5fa", fontFamily: "monospace", textDecoration: "none" }}
-                >
-                  {step.tx_hash.slice(0, 12)}...{step.tx_hash.slice(-6)} ↗
-                </a>
+      {/* Step cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.5rem", marginBottom: "1.25rem" }}>
+        {Object.entries(STEPS_META).map(([key, s], i) => {
+          const done = result?.steps?.some(rs => rs.name === key);
+          return (
+            <div key={key} style={{
+              background: done ? "#052e16" : "#111827",
+              border: `1px solid ${done ? "#16a34a" : "#1f2937"}`,
+              borderRadius: "8px", padding: "0.6rem", textAlign: "center",
+            }}>
+              <div style={{ fontSize: "1.1rem" }}>{s.emoji}</div>
+              <div style={{ fontSize: "0.65rem", color: done ? "#4ade80" : "#9ca3af", fontWeight: "bold", marginTop: "0.2rem" }}>
+                {i+1}. {s.label}
               </div>
-            ))}
+              {done && <div style={{ fontSize: "0.6rem", color: "#4ade80", marginTop: "0.2rem" }}>✓</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Terminal */}
+      <div style={{
+        background: "#030712", border: "1px solid #1f2937", borderRadius: "8px",
+        padding: "1rem", minHeight: "280px", maxHeight: "400px", overflowY: "auto", marginBottom: "1rem",
+      }}>
+        {logs.length === 0 && (
+          <div style={{ color: "#374151", fontSize: "0.8rem" }}>
+            <span style={{ color: "#4ade80" }}>$</span> Presiona{" "}
+            <span style={{ color: "#60a5fa" }}>Ejecutar Demo</span> para iniciar...
           </div>
-          <div style={{ marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid #1f2937", fontSize: "0.7rem", color: "#4b5563" }}>
-            agent: {result.agent_address.slice(0, 8)}...{result.agent_address.slice(-6)} →
-            platform: {result.platform_address.slice(0, 8)}...{result.platform_address.slice(-6)}
+        )}
+        {logs.map((line, i) => (
+          <div key={i} style={{
+            color: COLOR[line.type], fontSize: "0.78rem", lineHeight: 1.6, whiteSpace: "pre-wrap",
+            fontWeight: line.type === "section" ? "bold" : "normal",
+          }}>{line.text}</div>
+        ))}
+        {phase === "running" && <div style={{ color: "#4ade80", fontSize: "0.78rem" }}>▋</div>}
+      </div>
+
+      {/* Result summary */}
+      {result && (
+        <div style={{
+          background: "#052e16", border: "1px solid #16a34a", borderRadius: "8px",
+          padding: "1rem", marginBottom: "1rem",
+          display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem",
+        }}>
+          <div>
+            <div style={{ fontSize: "0.65rem", color: "#86efac", textTransform: "uppercase", letterSpacing: "0.05em" }}>Agente pagó</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "bold", color: "white" }}>${result.total_paid_usdc} USDC</div>
+          </div>
+          <div>
+            <div style={{ fontSize: "0.65rem", color: "#86efac", textTransform: "uppercase", letterSpacing: "0.05em" }}>Usuario recibió</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#4ade80" }}>{result.user_received}</div>
+          </div>
+          <div style={{ gridColumn: "1/-1", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+            {result.steps.map(s => (
+              <a key={s.name} href={s.stellar_expert_url} target="_blank" rel="noopener noreferrer"
+                style={{
+                  fontSize: "0.65rem", color: "#4ade80", background: "#14532d",
+                  padding: "0.2rem 0.5rem", borderRadius: "4px", textDecoration: "none",
+                  border: "1px solid #16a34a",
+                }}>
+                {STEPS_META[s.name]?.emoji} {s.name} ↗
+              </a>
+            ))}
           </div>
         </div>
       )}
+
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+        <button onClick={runDemo} disabled={phase === "running"} style={{
+          padding: "0.6rem 1.5rem", background: phase === "running" ? "#1f2937" : "#16a34a",
+          color: phase === "running" ? "#6b7280" : "white", border: "none", borderRadius: "6px",
+          cursor: phase === "running" ? "not-allowed" : "pointer",
+          fontSize: "0.875rem", fontWeight: "bold", fontFamily: "monospace",
+        }}>
+          {phase === "running" ? "▶ Ejecutando..." : "▶ Ejecutar Demo"}
+        </button>
+        {phase !== "idle" && (
+          <button onClick={reset} style={{
+            padding: "0.6rem 1rem", background: "transparent", color: "#6b7280",
+            border: "1px solid #374151", borderRadius: "6px", cursor: "pointer",
+            fontSize: "0.875rem", fontFamily: "monospace",
+          }}>↺ Reset</button>
+        )}
+      </div>
+      <p style={{ marginTop: "0.6rem", fontSize: "0.68rem", color: "#4b5563" }}>
+        Requiere DEMO_AGENT_SECRET_KEY con fondos USDC en Stellar testnet. Cada ejecución gasta ~$0.11 USDC reales.
+      </p>
     </div>
   );
 }

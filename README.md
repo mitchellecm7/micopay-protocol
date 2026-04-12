@@ -1,47 +1,73 @@
-# 🍄 Micopay Protocol
+# 🍄 MicoPay Protocol
 
-**x402 microservice infrastructure for AI agents on Stellar**
+**The first API that gives AI agents access to physical cash in Mexico**
 
 > Stellar Hacks: Agents — DoraHacks 2026
 
 ---
 
-## What is Micopay?
+## What is MicoPay?
 
-Micopay Protocol is a network of x402 microservices on Stellar that any AI agent can **discover, pay per-request, and compose**. No API keys. No signup. Payment IS authentication.
+MicoPay Protocol is an x402 API on Stellar that lets any AI agent — Claude, GPT, a Telegram bot, a WhatsApp assistant — find a trusted merchant near a user, verify their on-chain reputation, and initiate a trustless **USDC → MXN physical cash exchange** in milliseconds.
 
-The core primitive is an **atomic swap HTLC** (Soroban/Rust) coordinated by an AI agent: Claude understands intent and plans, a deterministic executor handles funds. The LLM never touches money.
+No API keys. No bank. No intermediary. **The payment IS the authentication.**
+
+The agent pays per-request with USDC via x402. The user gets physical cash.
+
+```
+User → "I need $500 MXN in cash near Roma Norte, CDMX"
+
+Agent:
+  1. cash_agents  ($0.001)  → Farmacia Guadalupe, 0.3km, tier Maestro 🍄
+  2. reputation   ($0.0005) → 98% completion, 312 trades, trusted: true
+  3. cash_request ($0.01)   → HTLC locks 28.57 USDC, returns claim_url
+  4. Agent → "Go to Orizaba 45. Open: https://app.micopay.xyz/claim/mcr-xxx"
+
+User opens link → QR on phone → walks to pharmacy → gets $500 MXN cash.
+Merchant scans QR → USDC released on-chain.
+
+Total cost to agent: $0.1115 USDC
+```
 
 ### Tracks covered
 
 | Track | What we built |
-|-------|---------------|
-| Paid agent services / APIs | Every endpoint is pay-per-request via x402 |
-| Agent-to-agent payments | Swap coordinator agent pays for services |
-| Rating, reputation, and trust | On-chain reputation (4 tiers, NFT soulbound) |
-| Agent marketplaces / discovery | SKILL.md + `/api/v1/services` endpoint |
-| DeFi integrations | Atomic swaps cross-chain via HTLCs |
+|---|---|
+| Paid agent services / APIs | Every endpoint pay-per-request via x402 |
+| Agent-to-agent payments | Agent pays for each service call autonomously |
+| Agent marketplaces / discovery | `SKILL.md` + `/api/v1/services` autodiscovery |
+| DeFi integrations | Soroban HTLC escrow + AtomicSwapHTLC (cross-chain roadmap) |
 
 ---
 
-## 🇲🇽 The Vision: Bridging Mexico's Informal Economy
+## 🇲🇽 The Problem
 
-Micopay was born from a simple but powerful goal: **connecting the 60%+ of Mexico's population in the informal economy with the global digital financial system.**
+Over 60% of Mexico's population is unbanked or underbanked. Cash is king. Traditional crypto on-ramps require bank accounts, KYC, and days of waiting.
 
-In markets where cash is king, traditional crypto on-ramps fail. Micopay uses **Stellar and Soroban** to build a trustless, decentralized "LocalBitcoins" specifically designed for emerging markets. By using **HTLCs (Hashed Time-Lock Contracts)** as a trustless escrow, we allow anyone to exchange stablecoins for physical cash without ever needing a bank account or a centralized intermediary.
+MicoPay solves this with a **verified P2P merchant network**: local shops (pharmacies, convenience stores) that hold MXN cash and accept USDC. The HTLC contract ensures neither party can cheat — the merchant only gets USDC after handing over cash, and the user gets a full refund if they don't show up.
+
+**AI agents are the perfect interface for this**: they can find the best merchant, verify trust signals a human would ignore, and handle the entire flow without the user touching crypto at all.
 
 ---
 
-## 📱 The Consumer Layer: Emerald Horizon (Mobile App)
+## The claim_url — QR delivery for any agent interface
 
-While the Micopay Protocol provides the "plumbing" for agents, **Emerald Horizon** is the primary entry point for human users. Located in the `/micopay` directory, it is a high-performance mobile application designed for secure P2P exchanges.
+A key design decision: the `cash_request` endpoint returns a `claim_url`:
 
-- **Map-Based Discovery:** Find verified "Micelio" nodes (cash endpoints) nearby in real-time.
-- **Secure P2P Chat:** Encrypted communication to coordinate exchange details.
-- **QR-Based Settlement:** Secure, one-time-use QR codes to reveal HTLC secrets and settle trades on-chain.
-*   **Reputation System:** 4-tier evolution (Espora → Micelio → Hongo → Maestro) powered by **Soulbound NFTs** on Stellar.
+```json
+{
+  "claim_url": "https://app.micopay.xyz/claim/mcr-4b6c0e5c",
+  "qr_payload": "micopay://claim?request_id=mcr-4b6c0e5c&...",
+  "instructions": "Go to Farmacia Guadalupe, Orizaba 45..."
+}
+```
 
-The mobile app demonstrates the protocol's power by turning every smartphone into a potential financial hub.
+The user opens the URL on their phone → full-screen QR → shows it to the merchant. No app install required. Works from any AI interface:
+
+- **Claude / ChatGPT** → paste the URL in chat
+- **Telegram bot** → inline button `[Ver QR 📱]`
+- **WhatsApp** → send the URL as a message
+- **MicoPay mobile app** → renders natively
 
 ---
 
@@ -50,50 +76,52 @@ The mobile app demonstrates the protocol's power by turning every smartphone int
 ```bash
 # 1. Clone and install
 git clone https://github.com/ericmt-98/micopay-mvp
-cd micopay-mvp
-npm install
+cd micopay-mvp && npm install
 
-# 2. Set environment variables
+# 2. Configure
 cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env — add ANTHROPIC_API_KEY
+# Edit apps/api/.env — already includes a testnet demo agent
 
 # 3. Start API (port 3000)
 cd apps/api && npm run dev
 
-# 4. Start dashboard (port 5173)
+# 4. Start dashboard (port 5186)
 cd apps/web && npm run dev
 
-# 5. Run the demo
-bash scripts/demo.sh
+# 5. Start MicoPay mobile app (port 5181)
+cd micopay/frontend && npm run dev
+
+# 6. Run the full demo
+curl -X POST http://localhost:3000/api/v1/demo/run
 ```
 
 ---
 
 ## Services (x402)
 
-| Service | Endpoint | Price |
-|---------|----------|-------|
-| Service Discovery | `GET /api/v1/services` | **free** |
-| SKILL.md | `GET /skill.md` | **free** |
-| Fund Stats | `GET /api/v1/fund/stats` | **free** |
-| Swap Search | `GET /api/v1/swaps/search` | $0.001 |
-| Reputation | `GET /api/v1/reputation/:address` | $0.0005 |
-| Swap Plan (Claude) | `POST /api/v1/swaps/plan` | $0.01 |
-| Swap Execute | `POST /api/v1/swaps/execute` | $0.05 |
-| Swap Status | `GET /api/v1/swaps/:id/status` | $0.0001 |
-| **Fund Micopay** | `POST /api/v1/fund` | **$0.10** |
+| Service | Endpoint | Price | Why pay? |
+|---|---|---|---|
+| Find cash merchants | `GET /api/v1/cash/agents` | $0.001 | Real-time merchant inventory — not on any public API |
+| Merchant reputation | `GET /api/v1/reputation/:address` | $0.0005 | On-chain trust signal — can't be faked |
+| Initiate cash exchange | `POST /api/v1/cash/request` | $0.01 | HTLC lock + QR generation + merchant notification |
+| Fund MicoPay | `POST /api/v1/fund` | $0.10 | Meta-demo: protocol funds itself |
+| Service discovery | `GET /api/v1/services` | free | |
+| Agent skill | `GET /skill.md` | free | |
+| Request status | `GET /api/v1/cash/request/:id` | free | |
+
+Not offered: generic USDC/XLM swaps — those exist on Stellar DEX for free.
 
 ### x402 Flow
 
 ```
-Agent → GET /api/v1/swaps/search
-      ← 402 { challenge: { amount_usdc: "0.001", pay_to: "G...", memo: "micopay:swap_search" } }
+Agent → POST /api/v1/cash/request
+      ← 402 { challenge: { amount_usdc: "0.01", pay_to: "G...", memo: "micopay:cash_request" } }
 
 Agent builds Stellar USDC payment tx, signs it
 
-Agent → GET /api/v1/swaps/search
+Agent → POST /api/v1/cash/request
         X-Payment: <signed_xdr>
-      ← 200 { counterparties: [...] }
+      ← 201 { claim_url: "https://app.micopay.xyz/claim/mcr-xxx", ... }
 ```
 
 ---
@@ -102,45 +130,38 @@ Agent → GET /api/v1/swaps/search
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                  AI Agent / User                 │
+│         AI Agent (Claude, GPT, Telegram bot)     │
+│  Receives: "User needs $500 MXN near Roma Norte" │
 └────────────────────────┬────────────────────────┘
-                         │ natural language intent
+                         │ x402 USDC payments per call
                          ▼
 ┌─────────────────────────────────────────────────┐
-│         Intent Parser (Claude Haiku)             │
-│  • Understands intent                            │
-│  • Calls tools: search_swaps, get_reputation     │
-│  • Produces SwapPlan JSON                        │
-│  • NEVER touches funds                           │
+│           MicoPay Protocol API (Fastify)         │
+│                                                  │
+│  GET /api/v1/cash/agents    → merchant list      │
+│  GET /api/v1/reputation/:a  → trust signal       │
+│  POST /api/v1/cash/request  → HTLC + claim_url   │
 └────────────────────────┬────────────────────────┘
-                         │ SwapPlan
-                         ▼
-┌─────────────────────────────────────────────────┐
-│         Swap Executor (TypeScript, no LLM)       │
-│  • Follows plan exactly                          │
-│  • Lock on chain A → monitor chain B             │
-│  • Release (reveals secret) → counterparty claims│
-│  • Refund on timeout                             │
-└──────────┬──────────────────────┬───────────────┘
-           │                      │
-           ▼                      ▼
-┌──────────────────┐  ┌──────────────────────────┐
-│ AtomicSwapHTLC   │  │ AtomicSwapHTLC            │
-│ (Soroban chain A)│  │ (chain B — or mock)       │
-│                  │  │                           │
-│ lock()           │  │ lock()                    │
-│ release() ←secret│  │ release() ← secret public │
-│ refund()         │  │ refund()                  │
-└──────────────────┘  └──────────────────────────┘
+                         │
+            ┌────────────┴────────────┐
+            ▼                         ▼
+┌───────────────────┐      ┌──────────────────────┐
+│  MicopayEscrow    │      │  claim_url page       │
+│  (Soroban HTLC)   │      │  app.micopay.xyz/     │
+│                   │      │  claim/:id            │
+│  lock()           │      │                       │
+│  release() ←QR   │      │  Full-screen QR       │
+│  refund()         │      │  No app required      │
+└───────────────────┘      └──────────────────────┘
 ```
 
 ### Key design principles
 
-1. **Payment IS authentication** — x402 replaces API keys
-2. **LLM plans, code executes** — Claude never touches funds
-3. **Two contracts, one trait** — `HashedTimeLock` shared between `AtomicSwapHTLC` and `MicopayEscrow`
-4. **Cross-chain without bridges** — atomicity from cryptography, not custodians
-5. **The project funds itself** — Fund Micopay proves x402 works in 10 seconds
+1. **Payment IS authentication** — x402 replaces API keys entirely
+2. **claim_url bridges any agent interface** — Claude, Telegram, WhatsApp all work
+3. **HTLC guarantees atomicity** — merchant can't take USDC without giving cash
+4. **On-chain reputation** — NFT soulbound badges, can't be bought or transferred
+5. **The protocol funds itself** — Fund MicoPay proves x402 in 10 seconds
 
 ---
 
@@ -150,106 +171,61 @@ Agent → GET /api/v1/swaps/search
 micopay-mvp/
 ├── contracts/
 │   ├── htlc-core/          # HashedTimeLock trait (Rust)
-│   ├── atomic-swap/        # Clean HTLC for cross-chain swaps
+│   ├── atomic-swap/        # Cross-chain HTLC (future: ETH/BTC/SOL → MXN)
 │   └── micopay-escrow/     # P2P escrow with platform fee
-├── packages/
-│   ├── types/              # Shared TypeScript types
-│   └── sdk/                # AtomicSwapClient + Stellar helpers
+├── micopay/
+│   ├── backend/            # MicoPay P2P backend (Node.js + in-memory store)
+│   ├── frontend/           # Mobile app (React/Vite, port 5181)
+│   │   └── src/pages/
+│   │       └── ClaimQR.tsx # QR page — accessible from any AI agent via URL
+│   └── contracts/
+│       └── escrow/         # MicoPay escrow contract (v0.1)
 ├── apps/
-│   ├── api/                # Fastify API with x402 middleware + Claude agent
-│   ├── agent/              # Claude intent parser + SwapExecutor
-│   └── web/                # React dashboard
-├── skill/
-│   └── SKILL.md            # OpenClaw agent skill definition
-└── scripts/
-    ├── demo.sh             # Full demo flow
-    └── deploy-contracts.sh # Deploy to testnet
+│   ├── api/                # MicoPay Protocol API (Fastify + x402, port 3000)
+│   │   └── src/routes/
+│   │       ├── cash.ts       # cash_agents + cash_request + claim_url
+│   │       ├── reputation.ts # on-chain merchant reputation
+│   │       ├── demo.ts       # full 4-step demo runner
+│   │       └── fund.ts       # meta-demo funding
+│   └── web/                # Protocol dashboard (React, port 5186)
+└── skill/
+    └── SKILL.md            # Agent autodiscovery file
 ```
 
 ---
 
 ## Contracts (Soroban/Rust)
 
-**32 unit tests, all passing:**
+**37 unit tests, all passing:**
 
 ```bash
 cd contracts && cargo test
 # atomic-swap:    15 tests ✓
 # micopay-escrow: 17 tests ✓
-# htlc-core:       0 tests (trait-only crate)
+
+cd micopay/contracts/escrow && cargo test
+# micopay-escrow: 5 tests ✓
 ```
 
 ### AtomicSwapHTLC — `contracts/atomic-swap`
 
-Clean HTLC for cross-chain atomic swaps. No fees, no business logic.
+Cross-chain HTLC for future multi-chain entry (ETH/BTC/SOL → physical MXN cash). Today: Stellar ↔ Stellar demo. Tomorrow: any chain → Mexico cash.
 
 | Function | Description |
-|----------|-------------|
-| `lock(initiator, counterparty, token, amount, secret_hash, timeout_ledgers)` | Lock funds. Returns `swap_id = sha256(secret_hash)` |
-| `release(swap_id, secret)` | Release to counterparty. Publishes secret in event for cross-chain coordination. |
+|---|---|
+| `lock(initiator, counterparty, token, amount, secret_hash, timeout_ledgers)` | Lock funds. `swap_id = sha256(secret_hash)` |
+| `release(swap_id, secret)` | Release to counterparty. Publishes secret for cross-chain coordination. |
 | `refund(swap_id)` | Permissionless refund after timeout. |
-| `get_swap(swap_id)` | View swap state. |
 
 ### MicopayEscrow — `contracts/micopay-escrow`
 
-P2P escrow with platform fee collection.
+P2P escrow used for the USDC → MXN cash exchange. Platform fee collected on release.
 
 | Function | Description |
-|----------|-------------|
-| `initialize(admin, token_id, platform_wallet)` | One-time setup. |
-| `lock(seller, buyer, amount, platform_fee, secret_hash, timeout_minutes)` | Lock funds + fee in escrow. |
-| `release(trade_id, secret)` | Pay buyer `amount`, pay platform `fee`. |
-| `refund(trade_id)` | Return `amount + fee` to seller after timeout. |
-| `get_trade(trade_id)` | View trade state. |
-
-### HashedTimeLock trait — `contracts/htlc-core`
-
-Shared interface and constants used by both contracts:
-
-```rust
-pub const MIN_TIMEOUT_LEDGERS: u32 = 60;   // ~5 min
-pub const TTL_MIN: u32 = 17_280;            // ~1 day
-pub const TTL_EXTEND: u32 = 518_400;        // ~30 days
-```
-
----
-
-## Agent (Claude)
-
-The intent parser lives in `apps/api/src/routes/agent.ts` and uses Claude Haiku to:
-
-1. Parse natural language swap intent
-2. Call real API tools (`search_swaps`, `get_reputation`, `calculate_timeouts`)
-3. Produce a structured `SwapPlan` JSON
-
-**Claude never executes transactions.** The SwapExecutor (`apps/agent/src/executor.ts`) follows the plan deterministically.
-
-```bash
-# Test the agent (requires ANTHROPIC_API_KEY + credits)
-curl -X POST http://localhost:3000/api/v1/swaps/plan \
-  -H "X-Payment: mock:MYAGENT:0.01" \
-  -H "Content-Type: application/json" \
-  -d '{"intent": "swap 50 USDC for XLM, best rate", "user_address": "G..."}'
-```
-
----
-
-## Fund Micopay — The Meta-Demo
-
-An agent funds the project using the same x402 infrastructure it's demonstrating.
-
-```bash
-# Step 1: Get challenge (no payment yet)
-curl -X POST http://localhost:3000/api/v1/fund
-
-# Step 2: Pay and fund
-curl -X POST http://localhost:3000/api/v1/fund \
-  -H "X-Payment: <signed_stellar_xdr>" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "x402 works!"}'
-```
-
-Response includes `stellar_expert_url` for on-chain verification. The dashboard updates live every 5 seconds.
+|---|---|
+| `lock(seller, buyer, amount, platform_fee, secret_hash, timeout_minutes)` | Lock funds + fee |
+| `release(trade_id, secret)` | Pay buyer + platform fee |
+| `refund(trade_id)` | Return everything to seller after timeout |
 
 ---
 
@@ -265,6 +241,18 @@ Contracts reviewed against Soroban security checklist:
 - ✅ `overflow-checks = true` in release profile
 - ✅ State machine prevents double-spend / double-release
 - ✅ Events emitted for all state changes (full auditability)
+- ✅ x402: USDC issuer verified, mock mode only in testnet demo
+
+---
+
+## Roadmap
+
+| Timeline | Feature |
+|---|---|
+| Today | Stellar testnet demo — full 4-step agent flow |
+| 1–3 months | Telegram bot integration, production merchant onboarding |
+| 3–6 months | AtomicSwapHTLC live: ETH/BTC → MXN cash (no bridges) |
+| 6–12 months | WhatsApp integration, mainnet launch, 100+ merchants CDMX |
 
 ---
 
@@ -272,4 +260,4 @@ Contracts reviewed against Soroban security checklist:
 
 Built for **Stellar Hacks: Agents** (DoraHacks 2026) by Eric + Stichui.
 
-Built with Claude Haiku 4.5, Soroban SDK, Stellar SDK, Fastify, React, Turborepo.
+Built with Soroban SDK, Stellar SDK, Fastify, React, x402, Turborepo.

@@ -6,26 +6,14 @@ use soroban_sdk::{
     token, Address, Bytes, BytesN, Env,
 };
 
-fn create_token_contract(
-    env: &Env,
-    admin: &Address,
-) -> (token::Client, token::StellarAssetClient, Address) {
-    let sac = env.register_stellar_asset_contract_v2(admin.clone());
-    let client = token::Client::new(env, &sac.address());
-    let admin_client = token::StellarAssetClient::new(env, &sac.address());
-    (client, admin_client, sac.address())
-}
-
 fn setup_env() -> (
     Env,
-    Address,                    // contract_id
-    Address,                    // admin
-    Address,                    // seller
-    Address,                    // buyer
-    Address,                    // platform_wallet
-    Address,                    // token_id
-    token::Client,              // token_client
-    token::StellarAssetClient,  // token_admin_client
+    Address,  // contract_id
+    Address,  // admin
+    Address,  // seller
+    Address,  // buyer
+    Address,  // platform_wallet
+    Address,  // token_id
 ) {
     let env = Env::default();
     env.mock_all_auths();
@@ -35,41 +23,33 @@ fn setup_env() -> (
     let buyer = Address::generate(&env);
     let platform_wallet = Address::generate(&env);
 
-    let (token_client, token_admin_client, token_id) = create_token_contract(&env, &admin);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_id = sac.address();
+
+    // Mint tokens to seller: 10,000 MXNe (7 decimals = 100_000_000_000 stroops)
+    token::StellarAssetClient::new(&env, &token_id).mint(&seller, &100_000_000_000);
 
     // Register the escrow contract
-    let contract_id = env.register(EscrowFactory, ());
+    let contract_id = env.register_contract(None, EscrowFactory);
 
     // Initialize
     let escrow = EscrowFactoryClient::new(&env, &contract_id);
     escrow.initialize(&admin, &token_id, &platform_wallet);
 
-    // Mint tokens to seller: 10,000 MXNe (7 decimals = 100_000_000_000 stroops)
-    token_admin_client.mint(&seller, &100_000_000_000);
-
-    (
-        env,
-        contract_id,
-        admin,
-        seller,
-        buyer,
-        platform_wallet,
-        token_id,
-        token_client,
-        token_admin_client,
-    )
+    (env, contract_id, admin, seller, buyer, platform_wallet, token_id)
 }
 
 fn make_secret(env: &Env) -> (Bytes, BytesN<32>) {
     let secret = Bytes::from_slice(env, b"test_secret_32_bytes_long_pad__!!");
-    let hash = env.crypto().sha256(&secret);
+    let hash: BytesN<32> = env.crypto().sha256(&secret).into();
     (secret, hash)
 }
 
 #[test]
 fn test_lock_and_release() {
-    let (env, contract_id, _, seller, buyer, platform_wallet, _, token_client, _) = setup_env();
+    let (env, contract_id, _, seller, buyer, platform_wallet, token_id) = setup_env();
     let escrow = EscrowFactoryClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
 
     let (secret, secret_hash) = make_secret(&env);
     let amount: i128 = 1_500_000_000; // 150 MXNe
@@ -116,8 +96,9 @@ fn test_lock_and_release() {
 
 #[test]
 fn test_refund_after_timeout() {
-    let (env, contract_id, _, seller, buyer, _, _, token_client, _) = setup_env();
+    let (env, contract_id, _, seller, buyer, _, token_id) = setup_env();
     let escrow = EscrowFactoryClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
 
     let (_, secret_hash) = make_secret(&env);
     let amount: i128 = 1_500_000_000;
@@ -155,7 +136,7 @@ fn test_refund_after_timeout() {
 #[test]
 #[should_panic(expected = "Error(Contract, #4)")] // InvalidSecret
 fn test_release_wrong_secret() {
-    let (env, contract_id, _, seller, buyer, _, _, _, _) = setup_env();
+    let (env, contract_id, _, seller, buyer, _, _) = setup_env();
     let escrow = EscrowFactoryClient::new(&env, &contract_id);
 
     let (_, secret_hash) = make_secret(&env);
@@ -169,7 +150,7 @@ fn test_release_wrong_secret() {
 #[test]
 #[should_panic(expected = "Error(Contract, #6)")] // TimeoutNotReached
 fn test_refund_before_timeout() {
-    let (env, contract_id, _, seller, buyer, _, _, _, _) = setup_env();
+    let (env, contract_id, _, seller, buyer, _, _) = setup_env();
     let escrow = EscrowFactoryClient::new(&env, &contract_id);
 
     let (_, secret_hash) = make_secret(&env);
@@ -182,7 +163,7 @@ fn test_refund_before_timeout() {
 
 #[test]
 fn test_double_initialize_fails() {
-    let (env, contract_id, admin, _, _, platform_wallet, token_id, _, _) = setup_env();
+    let (env, contract_id, admin, _, _, platform_wallet, token_id) = setup_env();
     let escrow = EscrowFactoryClient::new(&env, &contract_id);
 
     // Second initialize should return an error

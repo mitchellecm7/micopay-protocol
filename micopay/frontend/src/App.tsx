@@ -10,6 +10,8 @@ import QRReveal from './pages/QRReveal'
 import DepositQR from './pages/DepositQR'
 import SuccessScreen from './pages/SuccessScreen'
 import Explore from './pages/Explore'
+import CETESScreen from './pages/CETESScreen'
+import BlendScreen from './pages/BlendScreen'
 import BottomNav from './components/BottomNav'
 import { registerUser, createTrade, lockTrade, revealTrade, UserData, TradeData } from './services/api'
 
@@ -225,10 +227,25 @@ function App() {
       )}
 
       {currentPage === 'explore' && (
-        <Explore onBack={() => setCurrentPage('home')} />
+        <Explore onBack={() => setCurrentPage('home')} onNavigate={handleNavigate} />
       )}
 
-      {!['chat', 'chat_deposit', 'qr_reveal', 'qr_deposit', 'success'].includes(currentPage) && (
+      {currentPage === 'cetes' && (
+        <CETESScreen
+          onBack={() => setCurrentPage('explore')}
+          onBanco={() => setCurrentPage('deposit')}
+          userToken={buyerUser?.token}
+        />
+      )}
+
+      {currentPage === 'blend' && (
+        <BlendScreen
+          onBack={() => setCurrentPage('explore')}
+          userToken={buyerUser?.token}
+        />
+      )}
+
+      {!['chat', 'chat_deposit', 'qr_reveal', 'qr_deposit', 'success', 'cetes', 'blend'].includes(currentPage) && (
         <BottomNav currentPage={currentPage} onNavigate={handleNavigate} />
       )}
     </div>

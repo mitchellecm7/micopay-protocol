@@ -1,11 +1,10 @@
 import "./config.js"; // load .env into process.env first
 import Fastify from "fastify";
 import fastifyCors from "@fastify/cors";
-import { swapRoutes } from "./routes/swaps.js";
+import { cashRoutes } from "./routes/cash.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { fundRoutes } from "./routes/fund.js";
 import { serviceRoutes } from "./routes/services.js";
-import { agentRoutes } from "./routes/agent.js";
 import { demoRoutes } from "./routes/demo.js";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -49,11 +48,10 @@ app.get("/health", async () => ({
 }));
 
 // --- Routes ---
-app.register(swapRoutes);
+app.register(cashRoutes);
 app.register(reputationRoutes);
 app.register(fundRoutes);
 app.register(serviceRoutes);
-app.register(agentRoutes);
 app.register(demoRoutes);
 
 // --- Start ---

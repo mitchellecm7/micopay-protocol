@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import type { ServiceCatalog } from "@micopay/types";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -11,73 +10,61 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
   /**
    * GET /api/v1/services
-   * Free — agent service discovery
+   * FREE — agent service discovery
    */
   fastify.get("/api/v1/services", async (_request, reply) => {
-    const catalog: ServiceCatalog = {
+    return reply.send({
       protocol: "micopay",
-      version: "1.0.0",
+      version: "1.1.0",
+      tagline: "The first API that gives AI agents access to physical cash in Mexico",
       payment_method: "x402",
       payment_asset: "USDC",
       payment_network: "stellar",
       services: [
         {
-          name: "swap_search",
-          endpoint: "GET /api/v1/swaps/search",
+          name: "cash_agents",
+          endpoint: "GET /api/v1/cash/agents",
           method: "GET",
           price_usdc: "0.001",
-          description: "Search for available swap counterparties",
-          example_request: { sell_asset: "USDC", buy_asset: "XLM", amount: "100" },
-        },
-        {
-          name: "swap_plan",
-          endpoint: "POST /api/v1/swaps/plan",
-          method: "POST",
-          price_usdc: "0.01",
-          description: "AI-powered swap planning — Claude analyzes intent and produces executable plan",
-          example_request: { intent: "I want to swap 100 USDC for XLM", user_address: "G..." },
-        },
-        {
-          name: "swap_execute",
-          endpoint: "POST /api/v1/swaps/execute",
-          method: "POST",
-          price_usdc: "0.05",
-          description: "Execute an atomic swap plan on testnet",
-          example_request: { plan_id: "plan_xxx", user_address: "G..." },
-        },
-        {
-          name: "swap_status",
-          endpoint: "GET /api/v1/swaps/:id/status",
-          method: "GET",
-          price_usdc: "0.0001",
-          description: "Poll status of an in-progress swap",
+          description: "Find available cash merchants near a location. Returns merchants sorted by distance with availability, tier, and live USDC/MXN rate.",
+          example_request: { lat: "19.4195", lng: "-99.1627", amount: "500", limit: "5" },
+          why_pay: "Access to the MicoPay merchant network — no other API can tell you who has physical cash available near you right now.",
         },
         {
           name: "reputation",
           endpoint: "GET /api/v1/reputation/:address",
           method: "GET",
           price_usdc: "0.0005",
-          description: "Query on-chain reputation score for a Stellar address",
-          example_request: { address: "GABC..." },
+          description: "Verify a merchant's on-chain reputation before sending your user there. Returns tier, completion rate, trade history, and NFT soulbound badge.",
+          example_request: { address: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGKUJI5KOOJ9TXWNTBBS2JN" },
+          why_pay: "Reputation is the only signal an AI agent has before trusting a stranger with cash. This data is on-chain and cannot be faked.",
+        },
+        {
+          name: "cash_request",
+          endpoint: "POST /api/v1/cash/request",
+          method: "POST",
+          price_usdc: "0.01",
+          description: "Initiate a USDC → MXN physical cash exchange with a merchant. Locks USDC in an HTLC on Soroban. Returns QR code for the user.",
+          example_request: { merchant_address: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGKUJI5KOOJ9TXWNTBBS2JN", amount_mxn: 500 },
+          why_pay: "This triggers a real on-chain HTLC lock. The merchant is notified. USDC is secured by contract until the user collects the cash.",
         },
         {
           name: "fund_micopay",
           endpoint: "POST /api/v1/fund",
           method: "POST",
           price_usdc: "0.10",
-          description: "Fund the Micopay project using x402. Meta-demo: proves the infrastructure works.",
-          example_request: { message: "Great project!" },
+          description: "Fund the MicoPay project using x402. Meta-demo: the agent funds the protocol it just used, proving the infrastructure is self-sustaining.",
+          example_request: { message: "x402 works!" },
+          why_pay: "This IS the demonstration. The protocol finances itself with its own mechanism.",
         },
       ],
       skill_url: `${BASE_URL}/skill.md`,
-    };
-
-    return reply.send(catalog);
+      note: "NOT offered: generic USDC/XLM swaps — those exist on Stellar DEX for free. MicoPay only charges for what only MicoPay can do.",
+    });
   });
 
   /**
-   * GET /skill.md
-   * Free — OpenClaw SKILL.md for agent discovery
+   * GET /skill.md — OpenClaw SKILL.md for agent discovery
    */
   fastify.get("/skill.md", async (_request, reply) => {
     try {
