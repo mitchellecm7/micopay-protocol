@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { pool } from "../db/schema.js";
+import { query } from "../db/schema.js";
 
 export interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
@@ -40,7 +40,7 @@ async function measureLatency(fn: () => Promise<void>): Promise<{ latencyMs: num
 async function checkDatabase(): Promise<ComponentHealth> {
   try {
     const { latencyMs } = await measureLatency(async () => {
-      const result = await pool.query("SELECT 1 as health");
+      const result = await query("SELECT 1 as health");
       if (result.rows[0]?.health !== 1) {
         throw new Error("Invalid health check response");
       }

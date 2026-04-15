@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { query, pool } from "../db/schema.js";
+import { query } from "../db/schema.js";
 import { initX402Tables } from "../db/x402.js";
 import { initBazaarTables, seedAgentHistories, seedIntents } from "../db/bazaar.js";
 
@@ -13,7 +13,7 @@ async function waitForDatabase(maxRetries = 30) {
   console.log("⏳ Waiting for database connection...");
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const result = await pool.query("SELECT 1");
+      const result = await query("SELECT 1");
       if (result.rows[0]) {
         console.log("✅ Database connected!");
         return true;
@@ -298,7 +298,7 @@ async function main() {
     console.error("\n❌ Seed failed:", error);
     process.exit(1);
   } finally {
-    await pool.end();
+    
   }
 }
 

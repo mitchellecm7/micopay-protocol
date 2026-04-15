@@ -105,7 +105,7 @@ async function ensureBazaarInitialized() {
 }
 
 export async function bazaarRoutes(fastify: FastifyInstance): Promise<void> {
-  await ensureBazaarInitialized();
+  ensureBazaarInitialized().catch(console.error);
 
   fastify.post(
     "/api/v1/bazaar/intent",
