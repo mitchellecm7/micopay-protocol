@@ -1,6 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { createRateLimiter } from '../middleware/rateLimit.middleware.js';
+import { config } from '../config.js';
 import * as tradeService from '../services/trade.service.js';
+
+const tradeRateLimit = createRateLimiter({
+  windowMs: config.tradeRateLimitWindowMs,
+  max: config.tradeRateLimitMax,
+  keyGenerator: (req) => req.user?.id || req.ip,
+});
 
 export async function tradeRoutes(app: FastifyInstance) {
   // All trade routes require authentication
@@ -11,6 +19,7 @@ export async function tradeRoutes(app: FastifyInstance) {
    * Buyer creates a new trade. Generates HTLC secret and returns secret_hash.
    */
   app.post('/trades', {
+    preHandler: [tradeRateLimit],
     schema: {
       body: {
         type: 'object',

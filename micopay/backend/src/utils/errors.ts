@@ -42,3 +42,10 @@ export class UnauthorizedError extends AppError {
     this.name = 'UnauthorizedError';
   }
 }
+
+export class RateLimitError extends AppError {
+  constructor(message = 'Too many requests', public retryAfter?: number) {
+    super(429, message);
+    this.name = 'RateLimitError';
+  }
+}

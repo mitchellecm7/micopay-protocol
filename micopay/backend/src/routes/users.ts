@@ -2,7 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import db from '../db/schema.js';
 import { config } from '../config.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { createRateLimiter } from '../middleware/rateLimit.middleware.js';
 import { ConflictError } from '../utils/errors.js';
+
+const authRateLimit = createRateLimiter({
+  windowMs: config.authRateLimitWindowMs,
+  max: config.authRateLimitMax,
+});
 
 export async function userRoutes(app: FastifyInstance) {
   /**
@@ -10,6 +16,7 @@ export async function userRoutes(app: FastifyInstance) {
    * Create a new user + wallet. Returns a JWT so the user is immediately authenticated.
    */
   app.post('/users/register', {
+    preHandler: [authRateLimit],
     schema: {
       body: {
         type: 'object',

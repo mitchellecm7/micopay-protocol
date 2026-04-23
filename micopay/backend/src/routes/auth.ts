@@ -2,6 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { randomBytes } from 'crypto';
 import db from '../db/schema.js';
 import { config } from '../config.js';
+import { createRateLimiter } from '../middleware/rateLimit.middleware.js';
+
+const authRateLimit = createRateLimiter({
+  windowMs: config.authRateLimitWindowMs,
+  max: config.authRateLimitMax,
+});
 
 // In-memory challenge store (for MVP; use Redis in production)
 const challenges = new Map<string, { challenge: string; expiresAt: number }>();
@@ -12,6 +18,7 @@ export async function authRoutes(app: FastifyInstance) {
    * Generate a challenge for a Stellar address to sign (simplified SEP-10).
    */
   app.post('/auth/challenge', {
+    preHandler: [authRateLimit],
     schema: {
       body: {
         type: 'object',
@@ -41,6 +48,7 @@ export async function authRoutes(app: FastifyInstance) {
    * In production: verify using Stellar SDK's Keypair.verify().
    */
   app.post('/auth/token', {
+    preHandler: [authRateLimit],
     schema: {
       body: {
         type: 'object',
