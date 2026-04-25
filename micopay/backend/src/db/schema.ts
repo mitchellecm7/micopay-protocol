@@ -9,6 +9,7 @@ const mem: Record<string, any[]> = {
   wallets: [],
   trades: [],
   secret_access_log: [],
+  merchant_configs: [],
 };
 
 function memNow() { return new Date().toISOString(); }
@@ -149,14 +150,14 @@ function memQuery(sql: string, params: any[] = []): any[] {
 
   // ── UPDATE ───────────────────────────────────────────────────────────────
   if (upper.startsWith('UPDATE')) {
-    const tableMatch = s.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+)$/i);
-    if (!tableMatch) return [];
-    const tableName = tableMatch[1].toLowerCase();
-    const setStr = tableMatch[2];
-    const whereStr = tableMatch[3];
+    const updateMatch = s.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+?)(?:\s+RETURNING\s+(.+))?$/i);
+    if (!updateMatch) return [];
+    const tableName = updateMatch[1].toLowerCase();
+    const setStr = updateMatch[2];
+    const whereStr = updateMatch[3];
+    const returningSpec = updateMatch[4]?.trim();
 
     const updates: Record<string, any> = {};
-    // Split SET by comma, but careful with function calls — split only on ", col ="
     const setPairs = setStr.split(/,\s*(?=\w+\s*=)/);
     for (const pair of setPairs) {
       const m = pair.trim().match(/^(\w+)\s*=\s*(.+)$/i);
@@ -165,7 +166,16 @@ function memQuery(sql: string, params: any[] = []): any[] {
 
     const rows = (mem[tableName] ?? []).filter(row => evalCondition(row, whereStr, params));
     rows.forEach(row => Object.assign(row, updates));
-    return [];
+
+    if (!returningSpec) return [];
+    if (returningSpec === '*') return rows;
+
+    const retCols = returningSpec.split(',').map(c => c.trim());
+    return rows.map((row) => {
+      const partial: any = {};
+      retCols.forEach((c) => { partial[c] = row[c]; });
+      return partial;
+    });
   }
 
   return [];

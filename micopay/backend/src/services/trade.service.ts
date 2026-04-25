@@ -3,13 +3,68 @@ import { config } from '../config.js';
 import { generateTradeSecret, encryptSecret, decryptSecret } from './secret.service.js';
 import { createHash } from 'crypto';
 import { callLockOnChain, callReleaseOnChain, verifyLockOnChain } from './stellar.service.js';
-import { NotFoundError, ForbiddenError, ConflictError, BadRequestError } from '../utils/errors.js';
+import { NotFoundError, ForbiddenError, ConflictError, BadRequestError, MerchantLimitError } from '../utils/errors.js';
 
 // --- Trade lifecycle ---
 
 const STROOPS_PER_MXN = 10_000_000; // 7 decimals
 const PLATFORM_FEE_PERCENT = 0.8; // 0.8% platform fee
 const DEFAULT_TIMEOUT_MINUTES = 120; // 2 hours
+
+const DAILY_CAP_RESET_NOTE = 'Daily cap usage resets at 00:00 UTC.';
+
+function getUtcDayRange(date = new Date()) {
+  const start = new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    0,
+    0,
+    0,
+    0,
+  ));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+async function validateAgainstMerchantLimits(sellerId: string, amountMxn: number) {
+  const merchantConfig = await db.getOne(
+    `SELECT user_id, min_trade_mxn, max_trade_mxn, daily_cap_mxn
+     FROM merchant_configs
+     WHERE user_id = $1`,
+    [sellerId],
+  );
+
+  const minTrade = merchantConfig?.min_trade_mxn ?? 100;
+  const maxTrade = merchantConfig?.max_trade_mxn ?? 50000;
+  const dailyCap = merchantConfig?.daily_cap_mxn ?? 250000;
+
+  if (amountMxn < minTrade || amountMxn > maxTrade) {
+    throw new MerchantLimitError(
+      `Trade amount must be between merchant limits: ${minTrade} and ${maxTrade} MXN`,
+    );
+  }
+
+  const { start, end } = getUtcDayRange();
+  const todayTrades = await db.getMany<{ amount_mxn: number }>(
+    `SELECT amount_mxn
+     FROM trades
+     WHERE seller_id = $1
+       AND created_at >= $2
+       AND created_at < $3
+       AND status IN ('pending', 'locked', 'revealing', 'completed')`,
+    [sellerId, start.toISOString(), end.toISOString()],
+  );
+
+  const todayVolume = todayTrades.reduce((sum, t) => sum + Number(t.amount_mxn || 0), 0);
+  const projectedVolume = todayVolume + amountMxn;
+
+  if (projectedVolume > dailyCap) {
+    throw new MerchantLimitError(
+      `Daily merchant cap exceeded (${projectedVolume}/${dailyCap} MXN). ${DAILY_CAP_RESET_NOTE}`,
+    );
+  }
+}
 
 export interface CreateTradeInput {
   sellerId: string;
@@ -33,6 +88,8 @@ export async function createTrade(input: CreateTradeInput) {
   if (!buyer) throw new NotFoundError('Buyer not found');
 
   if (sellerId === buyerId) throw new BadRequestError('Cannot trade with yourself');
+
+  await validateAgainstMerchantLimits(sellerId, amountMxn);
 
   // Generate HTLC secret
   const { secret, secretHash } = generateTradeSecret();

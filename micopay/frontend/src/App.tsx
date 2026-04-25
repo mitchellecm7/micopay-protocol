@@ -13,6 +13,8 @@ import Explore from './pages/Explore'
 import CETESScreen from './pages/CETESScreen'
 import BlendScreen from './pages/BlendScreen'
 import BottomNav from './components/BottomNav'
+import Profile from './pages/Profile'
+import MerchantSettings from './pages/MerchantSettings'
 import { registerUser, createTrade, lockTrade, revealTrade, UserData, TradeData } from './services/api'
 
 function App() {
@@ -245,7 +247,22 @@ function App() {
         />
       )}
 
-      {!['chat', 'chat_deposit', 'qr_reveal', 'qr_deposit', 'success', 'cetes', 'blend'].includes(currentPage) && (
+
+      {currentPage === 'profile' && (
+        <Profile
+          token={sellerUser?.token ?? null}
+          onOpenMerchantSettings={() => setCurrentPage('merchant_settings')}
+        />
+      )}
+
+      {currentPage === 'merchant_settings' && (
+        <MerchantSettings
+          token={sellerUser?.token ?? null}
+          onBack={() => setCurrentPage('profile')}
+        />
+      )}
+
+      {!['chat', 'chat_deposit', 'qr_reveal', 'qr_deposit', 'success', 'cetes', 'blend', 'merchant_settings'].includes(currentPage) && (
         <BottomNav currentPage={currentPage} onNavigate={handleNavigate} />
       )}
     </div>

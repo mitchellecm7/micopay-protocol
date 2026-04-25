@@ -42,3 +42,10 @@ export class UnauthorizedError extends AppError {
     this.name = 'UnauthorizedError';
   }
 }
+
+export class MerchantLimitError extends AppError {
+  constructor(message = 'Merchant trade limits violated') {
+    super(422, message);
+    this.name = 'MerchantLimitError';
+  }
+}

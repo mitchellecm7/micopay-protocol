@@ -85,3 +85,19 @@ CREATE TABLE secret_access_log (
 );
 
 CREATE INDEX idx_secret_access_trade ON secret_access_log (trade_id);
+
+-- ================================================
+-- MERCHANT CONFIGS
+-- ================================================
+CREATE TABLE merchant_configs (
+  user_id         UUID PRIMARY KEY REFERENCES users(id),
+  rate_percent    NUMERIC(5,2) NOT NULL DEFAULT 1.00,
+  min_trade_mxn   INTEGER NOT NULL DEFAULT 100,
+  max_trade_mxn   INTEGER NOT NULL DEFAULT 50000,
+  daily_cap_mxn   INTEGER NOT NULL DEFAULT 250000,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (min_trade_mxn >= 100 AND min_trade_mxn <= 50000),
+  CHECK (max_trade_mxn >= 100 AND max_trade_mxn <= 50000),
+  CHECK (min_trade_mxn <= max_trade_mxn),
+  CHECK (daily_cap_mxn >= max_trade_mxn)
+);
