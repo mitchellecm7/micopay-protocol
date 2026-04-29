@@ -2,23 +2,126 @@ import db from '../db/schema.js';
 import { config } from '../config.js';
 import { generateTradeSecret, encryptSecret, decryptSecret } from './secret.service.js';
 import { createHash } from 'crypto';
-import { callLockOnChain, callReleaseOnChain, verifyLockOnChain } from './stellar.service.js';
+import type { FastifyRequest } from 'fastify';
+import { callLockOnChain, callReleaseOnChain, verifyLockOnChain, assertNotReplayed } from './stellar.service.js';
 import { NotFoundError, ForbiddenError, ConflictError, BadRequestError } from '../utils/errors.js';
+import {
+  getTradeAuditTrail as getTradeAuditTrailRows,
+  insertTradeAuditEvent,
+} from '../db/audit-log.model.js';
 
 // --- Trade lifecycle ---
 
 const STROOPS_PER_MXN = 10_000_000; // 7 decimals
 const PLATFORM_FEE_PERCENT = 0.8; // 0.8% platform fee
 const DEFAULT_TIMEOUT_MINUTES = 120; // 2 hours
+const UNKNOWN_STATE = 'unknown';
+
+interface TransitionFailureContext {
+  tradeId: string;
+  fromState: string;
+  toState: string;
+  actor: string;
+  metadata?: Record<string, unknown>;
+}
+
+function transitionFailureMetadata(error: unknown, metadata: Record<string, unknown> = {}) {
+  if (error instanceof Error) {
+    return {
+      ...metadata,
+      success: false,
+      reason: error.message,
+      error_name: error.name,
+    };
+  }
+
+  return {
+    ...metadata,
+    success: false,
+    reason: String(error),
+    error_name: 'UnknownError',
+  };
+}
+
+async function logTransitionFailure(context: TransitionFailureContext, error: unknown) {
+  try {
+    await insertTradeAuditEvent({
+      tradeId: context.tradeId,
+      fromState: context.fromState,
+      toState: context.toState,
+      actor: context.actor,
+      metadata: transitionFailureMetadata(error, context.metadata),
+    });
+  } catch (auditError) {
+    console.error('[audit_log] Failed to persist failed transition', auditError);
+  }
+}
+
+const DAILY_CAP_RESET_NOTE = 'Daily cap usage resets at 00:00 UTC.';
+
+function getUtcDayRange(date = new Date()) {
+  const start = new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    0,
+    0,
+    0,
+    0,
+  ));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+async function validateAgainstMerchantLimits(sellerId: string, amountMxn: number) {
+  const merchantConfig = await db.getOne(
+    `SELECT user_id, min_trade_mxn, max_trade_mxn, daily_cap_mxn
+     FROM merchant_configs
+     WHERE user_id = $1`,
+    [sellerId],
+  );
+
+  const minTrade = merchantConfig?.min_trade_mxn ?? 100;
+  const maxTrade = merchantConfig?.max_trade_mxn ?? 50000;
+  const dailyCap = merchantConfig?.daily_cap_mxn ?? 250000;
+
+  if (amountMxn < minTrade || amountMxn > maxTrade) {
+    throw new MerchantLimitError(
+      `Trade amount must be between merchant limits: ${minTrade} and ${maxTrade} MXN`,
+    );
+  }
+
+  const { start, end } = getUtcDayRange();
+  const todayTrades = await db.getMany<{ amount_mxn: number }>(
+    `SELECT amount_mxn
+     FROM trades
+     WHERE seller_id = $1
+       AND created_at >= $2
+       AND created_at < $3
+       AND status IN ('pending', 'locked', 'revealing', 'completed')`,
+    [sellerId, start.toISOString(), end.toISOString()],
+  );
+
+  const todayVolume = todayTrades.reduce((sum, t) => sum + Number(t.amount_mxn || 0), 0);
+  const projectedVolume = todayVolume + amountMxn;
+
+  if (projectedVolume > dailyCap) {
+    throw new MerchantLimitError(
+      `Daily merchant cap exceeded (${projectedVolume}/${dailyCap} MXN). ${DAILY_CAP_RESET_NOTE}`,
+    );
+  }
+}
 
 export interface CreateTradeInput {
+  request: FastifyRequest;
   sellerId: string;
   buyerId: string;
   amountMxn: number;
 }
 
 export async function createTrade(input: CreateTradeInput) {
-  const { sellerId, buyerId, amountMxn } = input;
+  const { request, sellerId, buyerId, amountMxn } = input;
+  request.log.info({ seller_id: sellerId, buyer_id: buyerId, amount_mxn: amountMxn, category: 'trade.lifecycle' }, '[trade] Creating trade');
 
   if (amountMxn < 100 || amountMxn > 50000) {
     throw new BadRequestError('amount_mxn must be between 100 and 50,000');
@@ -33,6 +136,8 @@ export async function createTrade(input: CreateTradeInput) {
   if (!buyer) throw new NotFoundError('Buyer not found');
 
   if (sellerId === buyerId) throw new BadRequestError('Cannot trade with yourself');
+
+  await validateAgainstMerchantLimits(sellerId, amountMxn);
 
   // Generate HTLC secret
   const { secret, secretHash } = generateTradeSecret();
@@ -64,6 +169,19 @@ export async function createTrade(input: CreateTradeInput) {
       expiresAt,
     ],
   );
+
+  await insertTradeAuditEvent({
+    tradeId: result.id,
+    fromState: UNKNOWN_STATE,
+    toState: 'pending',
+    actor: buyerId,
+    metadata: {
+      success: true,
+      amount_mxn: amountMxn,
+      seller_id: sellerId,
+      buyer_id: buyerId,
+    },
+  });
 
   return result;
 }
@@ -133,73 +251,129 @@ export async function getTradeHistory(userId: string, status?: string, page = 1,
 }
 
 export async function lockTrade(
+  request: FastifyRequest,
   tradeId: string,
   userId: string,
 ) {
-  const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
-  if (!trade) throw new NotFoundError('Trade not found');
-  if (trade.seller_id !== userId) throw new ForbiddenError('Only the seller can lock');
-  if (trade.status !== 'pending') throw new ConflictError(`Trade is ${trade.status}, expected pending`);
+  request.log.info({ trade_id: tradeId, user_id: userId, category: 'trade.lifecycle' }, '[trade] Locking trade');
+  let fromState = UNKNOWN_STATE;
 
-  // Fetch buyer's Stellar address
-  const buyer = await db.getOne('SELECT stellar_address FROM users WHERE id = $1', [trade.buyer_id]);
-  if (!buyer) throw new NotFoundError('Buyer not found');
+  try {
+    const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
+    if (!trade) throw new NotFoundError('Trade not found');
 
-  let lockTxHash: string;
-  let stellarTradeId: string;
+    fromState = trade.status;
+    if (trade.seller_id !== userId) throw new ForbiddenError('Only the seller can lock');
+    if (trade.status !== 'pending') throw new ConflictError(`Trade is ${trade.status}, expected pending`);
 
-  if (!config.mockStellar) {
-    // Real on-chain lock via Soroban
-    const result = await callLockOnChain({
-      buyerStellarAddress: buyer.stellar_address,
-      amountStroops: BigInt(trade.amount_stroops),
-      platformFeeMxn: trade.platform_fee_mxn,
-      secretHash: trade.secret_hash,
-    });
-    lockTxHash = result.txHash;
-    stellarTradeId = result.txHash;
-  } else {
-    // Mock mode — generate placeholder hashes
-    const verified = await verifyLockOnChain(
-      `mock_${Date.now()}`,
-      trade.seller_id,
-      BigInt(trade.amount_stroops),
+    // Fetch buyer's Stellar address
+    const buyer = await db.getOne('SELECT stellar_address FROM users WHERE id = $1', [trade.buyer_id]);
+    if (!buyer) throw new NotFoundError('Buyer not found');
+
+    let lockTxHash: string;
+    let stellarTradeId: string;
+
+    if (!config.mockStellar) {
+      // Real on-chain lock via Soroban
+      const result = await callLockOnChain({
+        request,
+        buyerStellarAddress: buyer.stellar_address,
+        amountStroops: BigInt(trade.amount_stroops),
+        platformFeeMxn: trade.platform_fee_mxn,
+        secretHash: trade.secret_hash,
+      });
+      lockTxHash = result.txHash;
+      stellarTradeId = result.txHash;
+    } else {
+      // Mock mode — generate placeholder hashes
+      const verified = await verifyLockOnChain(
+        request,
+        `mock_${Date.now()}`,
+        trade.seller_id,
+        BigInt(trade.amount_stroops),
+      );
+      if (!verified) throw new BadRequestError('Could not verify lock on-chain');
+      lockTxHash = `mock_${Date.now()}`;
+      stellarTradeId = lockTxHash;
+    }
+
+    await assertNotReplayed(lockTxHash, 'trade/lock', userId);
+
+    await db.execute(
+      `UPDATE trades
+       SET status = 'locked',
+           stellar_trade_id = $2,
+           lock_tx_hash = $3,
+           locked_at = NOW()
+       WHERE id = $1`,
+      [tradeId, stellarTradeId, lockTxHash],
     );
-    if (!verified) throw new BadRequestError('Could not verify lock on-chain');
-    lockTxHash = `mock_${Date.now()}`;
-    stellarTradeId = lockTxHash;
+
+    await insertTradeAuditEvent({
+      tradeId,
+      fromState,
+      toState: 'locked',
+      actor: userId,
+      metadata: {
+        success: true,
+        lock_tx_hash: lockTxHash,
+        stellar_trade_id: stellarTradeId,
+      },
+    });
+
+    return { status: 'locked', lock_tx_hash: lockTxHash };
+  } catch (error) {
+    await logTransitionFailure({
+      tradeId,
+      fromState,
+      toState: 'locked',
+      actor: userId,
+    }, error);
+    throw error;
   }
-
-  await db.execute(
-    `UPDATE trades
-     SET status = 'locked',
-         stellar_trade_id = $2,
-         lock_tx_hash = $3,
-         locked_at = NOW()
-     WHERE id = $1`,
-    [tradeId, stellarTradeId, lockTxHash],
-  );
-
-  return { status: 'locked', lock_tx_hash: lockTxHash };
 }
 
-export async function revealTrade(tradeId: string, userId: string) {
-  const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
-  if (!trade) throw new NotFoundError('Trade not found');
-  if (trade.seller_id !== userId) throw new ForbiddenError('Only the seller can reveal');
-  if (trade.status !== 'locked') throw new ConflictError(`Trade is ${trade.status}, expected locked`);
+export async function revealTrade(request: FastifyRequest, tradeId: string, userId: string) {
+  request.log.info({ trade_id: tradeId, user_id: userId, category: 'trade.lifecycle' }, '[trade] Revealing trade');
+  let fromState = UNKNOWN_STATE;
 
-  await db.execute(
-    `UPDATE trades
-     SET status = 'revealing', reveal_requested_at = NOW()
-     WHERE id = $1`,
-    [tradeId],
-  );
+  try {
+    const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
+    if (!trade) throw new NotFoundError('Trade not found');
 
-  return { status: 'revealing' };
+    fromState = trade.status;
+    if (trade.seller_id !== userId) throw new ForbiddenError('Only the seller can reveal');
+    if (trade.status !== 'locked') throw new ConflictError(`Trade is ${trade.status}, expected locked`);
+
+    await db.execute(
+      `UPDATE trades
+       SET status = 'revealing', reveal_requested_at = NOW()
+       WHERE id = $1`,
+      [tradeId],
+    );
+
+    await insertTradeAuditEvent({
+      tradeId,
+      fromState,
+      toState: 'revealing',
+      actor: userId,
+      metadata: { success: true },
+    });
+
+    return { status: 'revealing' };
+  } catch (error) {
+    await logTransitionFailure({
+      tradeId,
+      fromState,
+      toState: 'revealing',
+      actor: userId,
+    }, error);
+    throw error;
+  }
 }
 
-export async function getTradeSecret(tradeId: string, userId: string, ip: string, userAgent: string) {
+export async function getTradeSecret(request: FastifyRequest, tradeId: string, userId: string, ip: string, userAgent: string) {
+  request.log.info({ trade_id: tradeId, user_id: userId, category: 'trade.lifecycle' }, '[trade] Secret accessed');
   const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
   if (!trade) throw new NotFoundError('Trade not found');
 
@@ -233,66 +407,129 @@ export async function getTradeSecret(tradeId: string, userId: string, ip: string
   return { secret, qr_payload: qrPayload, expires_in: 120 };
 }
 
-export async function completeTrade(tradeId: string, userId: string) {
-  const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
-  if (!trade) throw new NotFoundError('Trade not found');
-  if (trade.buyer_id !== userId) throw new ForbiddenError('Only the buyer can complete');
-  if (trade.status !== 'revealing') {
-    throw new ConflictError(`Trade is ${trade.status}, expected revealing`);
+export async function completeTrade(request: FastifyRequest, tradeId: string, userId: string) {
+  request.log.info({ trade_id: tradeId, user_id: userId, category: 'trade.lifecycle' }, '[trade] Completing trade');
+  let fromState = UNKNOWN_STATE;
+
+  try {
+    const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
+    if (!trade) throw new NotFoundError('Trade not found');
+
+    fromState = trade.status;
+    if (trade.buyer_id !== userId) throw new ForbiddenError('Only the buyer can complete');
+    if (trade.status !== 'revealing') {
+      throw new ConflictError(`Trade is ${trade.status}, expected revealing`);
+    }
+
+    // Decrypt the HTLC secret stored at lock time
+    const secret = decryptSecret(trade.secret_enc, trade.secret_nonce);
+
+    let releaseTxHash: string;
+
+    if (!config.mockStellar) {
+      // Compute trade_id as the contract does: sha256(secret_hash_bytes)
+      const secretHashBytes = Buffer.from(trade.secret_hash, 'hex');
+      const tradeIdBytes = createHash('sha256').update(secretHashBytes).digest();
+      const secretBytes = Buffer.from(secret, 'hex');
+
+      const result = await callReleaseOnChain({ request, tradeIdBytes, secretBytes });
+      releaseTxHash = result.txHash;
+    } else {
+      releaseTxHash = `mock_release_${Date.now()}`;
+    }
+
+    await assertNotReplayed(releaseTxHash, 'trade/complete', userId);
+
+    // Clear encrypted secret from DB now that release is confirmed on-chain
+    await db.execute(
+      `UPDATE trades
+       SET status = 'completed',
+           release_tx_hash = $2,
+           completed_at = NOW(),
+           secret_enc = NULL,
+           secret_nonce = NULL
+       WHERE id = $1`,
+      [tradeId, releaseTxHash],
+    );
+
+    await insertTradeAuditEvent({
+      tradeId,
+      fromState,
+      toState: 'completed',
+      actor: userId,
+      metadata: {
+        success: true,
+        release_tx_hash: releaseTxHash,
+      },
+    });
+
+    return { status: 'completed', release_tx_hash: releaseTxHash };
+  } catch (error) {
+    await logTransitionFailure({
+      tradeId,
+      fromState,
+      toState: 'completed',
+      actor: userId,
+    }, error);
+    throw error;
   }
-
-  // Decrypt the HTLC secret stored at lock time
-  const secret = decryptSecret(trade.secret_enc, trade.secret_nonce);
-
-  let releaseTxHash: string;
-
-  if (!config.mockStellar) {
-    // Compute trade_id as the contract does: sha256(secret_hash_bytes)
-    const secretHashBytes = Buffer.from(trade.secret_hash, 'hex');
-    const tradeIdBytes = createHash('sha256').update(secretHashBytes).digest();
-    const secretBytes = Buffer.from(secret, 'hex');
-
-    const result = await callReleaseOnChain({ tradeIdBytes, secretBytes });
-    releaseTxHash = result.txHash;
-  } else {
-    releaseTxHash = `mock_release_${Date.now()}`;
-  }
-
-  // Clear encrypted secret from DB now that release is confirmed on-chain
-  await db.execute(
-    `UPDATE trades
-     SET status = 'completed',
-         release_tx_hash = $2,
-         completed_at = NOW(),
-         secret_enc = NULL,
-         secret_nonce = NULL
-     WHERE id = $1`,
-    [tradeId, releaseTxHash],
-  );
-
-  return { status: 'completed', release_tx_hash: releaseTxHash };
 }
 
-export async function cancelTrade(tradeId: string, userId: string) {
-  const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
-  if (!trade) throw new NotFoundError('Trade not found');
+export async function cancelTrade(tradeId: string, userId: string, reason?: string) {
+  let fromState = UNKNOWN_STATE;
 
-  if (trade.seller_id !== userId && trade.buyer_id !== userId) {
-    throw new ForbiddenError('Not a participant of this trade');
+  try {
+    const trade = await db.getOne('SELECT * FROM trades WHERE id = $1', [tradeId]);
+    if (!trade) throw new NotFoundError('Trade not found');
+
+    fromState = trade.status;
+    if (trade.seller_id !== userId && trade.buyer_id !== userId) {
+      throw new ForbiddenError('Not a participant of this trade');
+    }
+
+    if (trade.status !== 'pending') {
+      throw new ConflictError(`Cannot cancel trade in status ${trade.status}. Only pending trades can be cancelled.`);
+    }
+
+    await db.execute(
+      `UPDATE trades
+       SET status = 'cancelled',
+           secret_enc = NULL,
+           secret_nonce = NULL
+       WHERE id = $1`,
+      [tradeId],
+    );
+
+    await insertTradeAuditEvent({
+      tradeId,
+      fromState,
+      toState: 'cancelled',
+      actor: userId,
+      metadata: {
+        success: true,
+        cancel_reason: reason ?? null,
+      },
+    });
+
+    return { status: 'cancelled' };
+  } catch (error) {
+    await logTransitionFailure({
+      tradeId,
+      fromState,
+      toState: 'cancelled',
+      actor: userId,
+      metadata: { cancel_reason: reason ?? null },
+    }, error);
+    throw error;
   }
+}
 
-  if (trade.status !== 'pending') {
-    throw new ConflictError(`Cannot cancel trade in status ${trade.status}. Only pending trades can be cancelled.`);
-  }
+export async function getTradeAuditTrail(tradeId: string, userId: string) {
+  await getTradeById(tradeId, userId);
 
-  await db.execute(
-    `UPDATE trades
-     SET status = 'cancelled',
-         secret_enc = NULL,
-         secret_nonce = NULL
-     WHERE id = $1`,
-    [tradeId],
-  );
-
-  return { status: 'cancelled' };
+  const events = await getTradeAuditTrailRows(tradeId);
+  return events.map((event) => ({
+    ...event,
+    timestamp: event.occurred_at,
+  }));
 }

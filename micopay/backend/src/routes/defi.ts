@@ -142,6 +142,7 @@ export async function defiRoutes(app: FastifyInstance) {
         explorerUrl: `https://stellar.expert/explorer/public/tx/${result.hash}`,
       };
     } catch (err: any) {
+      request.log.error({ err: err.message, category: 'stellar.tx' }, '[defi] CETES buy failed');
       return reply.status(500).send({ error: err.message || 'Failed to buy CETES' });
     }
   });

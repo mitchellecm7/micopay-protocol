@@ -78,3 +78,34 @@ x402 payment layer are identical in both.
 
 The scaffolding exists to make the demo runnable in isolation without needing
 live P2P users, a production Etherfuse integration, or a cross-chain relayer.
+
+---
+
+## Security
+
+### Stellar tx-hash replay protection
+
+**Problem (pre-fix)**: the backend held processed tx hashes only in an
+in-memory `Set`. A process restart emptied the set, allowing a re-submitted
+signed XDR to be credited a second time — a financial double-spend.
+
+**Fix**: every code path that credits a Stellar payment calls
+`assertNotReplayed(txHash, route, userId)` (in `stellar.service.ts`)
+**before** any trade-state mutation. The function performs an atomic
+`INSERT INTO processed_tx … ON CONFLICT (tx_hash) DO NOTHING` and throws a
+typed `ReplayError` (HTTP 409) if the hash is already present.
+
+| Detail | Value |
+|---|---|
+| Table | `processed_tx (tx_hash PK, source_route, user_id, processed_at)` |
+| Migration | `micopay/sql/migrations/001_processed_tx.sql` |
+| Error type | `ReplayError` → `{ error: "ReplayError", message: "Stellar tx <hash> has already been processed via <route>" }` |
+| Concurrency | Single atomic INSERT — no TOCTOU window even under parallel requests |
+| Restart safety | Rows persist in PostgreSQL across restarts |
+| Audit | `processed_tx` is append-only; rows are never deleted |
+| Scope | Testnet — mainnet hardening is deferred per spec |
+
+Protected transitions:
+
+- **`trade/lock`** — after `callLockOnChain()` returns a confirmed hash
+- **`trade/complete`** — after `callReleaseOnChain()` returns a confirmed hash
