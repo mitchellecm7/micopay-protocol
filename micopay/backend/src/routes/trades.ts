@@ -36,6 +36,7 @@ export async function tradeRoutes(app: FastifyInstance) {
     const buyerId = request.user.id;
 
     const trade = await tradeService.createTrade({
+      request,
       sellerId: seller_id,
       buyerId,
       amountMxn: amount_mxn,
@@ -63,7 +64,13 @@ export async function tradeRoutes(app: FastifyInstance) {
    * All trades (active + completed) for the authenticated user, newest first.
    */
   app.get('/trades/history', async (request) => {
-    const trades = await tradeService.getTradeHistory(request.user.id);
+    const { status, page, limit } = request.query as { status?: string; page?: string; limit?: string };
+    const trades = await tradeService.getTradeHistory(
+      request.user.id,
+      status,
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 20
+    );
     return { trades };
   });
 
@@ -85,7 +92,7 @@ export async function tradeRoutes(app: FastifyInstance) {
    */
   app.post('/trades/:id/lock', async (request) => {
     const { id } = request.params as { id: string };
-    return tradeService.lockTrade(id, request.user.id);
+    return tradeService.lockTrade(request, id, request.user.id);
   });
 
   /**
@@ -94,7 +101,7 @@ export async function tradeRoutes(app: FastifyInstance) {
    */
   app.post('/trades/:id/reveal', async (request) => {
     const { id } = request.params as { id: string };
-    return tradeService.revealTrade(id, request.user.id);
+    return tradeService.revealTrade(request, id, request.user.id);
   });
 
   /**
@@ -105,6 +112,7 @@ export async function tradeRoutes(app: FastifyInstance) {
   app.get('/trades/:id/secret', async (request) => {
     const { id } = request.params as { id: string };
     return tradeService.getTradeSecret(
+      request,
       id,
       request.user.id,
       request.ip,
@@ -118,7 +126,7 @@ export async function tradeRoutes(app: FastifyInstance) {
    */
   app.post('/trades/:id/complete', async (request) => {
     const { id } = request.params as { id: string };
-    return tradeService.completeTrade(id, request.user.id);
+    return tradeService.completeTrade(request, id, request.user.id);
   });
 
   /**
@@ -127,6 +135,17 @@ export async function tradeRoutes(app: FastifyInstance) {
    */
   app.post('/trades/:id/cancel', async (request) => {
     const { id } = request.params as { id: string };
-    return tradeService.cancelTrade(id, request.user.id);
+    const { reason } = (request.body as { reason?: string } | undefined) ?? {};
+    return tradeService.cancelTrade(id, request.user.id, reason);
+  });
+
+  /**
+   * GET /trades/:id/audit
+   * Ordered trade transition audit trail for support/ops.
+   */
+  app.get('/trades/:id/audit', async (request) => {
+    const { id } = request.params as { id: string };
+    const audit = await tradeService.getTradeAuditTrail(id, request.user.id);
+    return { audit };
   });
 }

@@ -1,4 +1,26 @@
 import { config } from '../config.js';
+import type { FastifyRequest } from 'fastify';
+import db from '../db/schema.js';
+import { ReplayError } from '../utils/errors.js';
+
+export async function assertNotReplayed(
+  txHash: string,
+  route: string,
+  userId: string,
+): Promise<void> {
+  const inserted = await db.insertUnique(
+    `INSERT INTO processed_tx (tx_hash, source_route, user_id, processed_at)
+     VALUES ($1, $2, $3, NOW())
+     RETURNING tx_hash`,
+    [txHash, route, userId],
+    'tx_hash',
+  );
+
+  if (inserted === null) {
+    throw new ReplayError(txHash, route);
+  }
+}
+
 
 const STROOPS_PER_MXN = 10_000_000n;
 const DEFAULT_TIMEOUT_MINUTES = 120;
@@ -9,6 +31,7 @@ const DEFAULT_TIMEOUT_MINUTES = 120;
  * Returns the real transaction hash, visible on stellar.expert.
  */
 export async function callLockOnChain(params: {
+  request: FastifyRequest;
   buyerStellarAddress: string;
   amountStroops: bigint;
   platformFeeMxn: number;
@@ -57,12 +80,11 @@ export async function callLockOnChain(params: {
     .setTimeout(60)
     .build();
 
-  // prepareTransaction = simulate + assemble footprint + add Soroban auth
   let prepared;
   try {
     prepared = await rpc.prepareTransaction(tx);
   } catch (err: any) {
-    console.error('[Stellar] Simulation failed:', err.message);
+    params.request.log.error({ err: err.message, category: 'stellar.tx' }, '[Stellar] Simulation failed');
     throw new Error(`Simulation failed: ${err.message}. Check if contract is deployed and parameters are correct.`);
   }
 
@@ -70,7 +92,7 @@ export async function callLockOnChain(params: {
 
   const sendResult = await rpc.sendTransaction(prepared);
   if (sendResult.status === 'ERROR') {
-    console.error('[Stellar] Send failed:', sendResult.errorResult);
+    params.request.log.error({ detail: sendResult.errorResult, category: 'stellar.tx' }, '[Stellar] Send failed');
     throw new Error(`Send failed: ${JSON.stringify(sendResult.errorResult)}`);
   }
 
@@ -85,7 +107,7 @@ export async function callLockOnChain(params: {
       if (res.ok) {
         const data = await res.json() as { successful: boolean };
         if (data.successful) {
-          console.log(`[Stellar] Lock confirmed: ${txHash}`);
+          params.request.log.info({ tx_hash: txHash, category: 'stellar.tx' }, '[Stellar] Lock confirmed');
           return { txHash };
         }
         throw new Error(`Lock transaction failed on-chain: ${txHash}`);
@@ -106,6 +128,7 @@ export async function callLockOnChain(params: {
  * trade_id = sha256(secret_hash_bytes), matching compute_trade_id() in the contract.
  */
 export async function callReleaseOnChain(params: {
+  request: FastifyRequest;
   tradeIdBytes: Buffer;  // 32 bytes: sha256(secret_hash_bytes)
   secretBytes: Buffer;   // 32 bytes: raw HTLC preimage
 }): Promise<{ txHash: string }> {
@@ -141,7 +164,7 @@ export async function callReleaseOnChain(params: {
   try {
     prepared = await rpc.prepareTransaction(tx);
   } catch (err: any) {
-    console.error('[Stellar] Release simulation failed:', err.message);
+    params.request.log.error({ err: err.message, category: 'stellar.tx' }, '[Stellar] Release simulation failed');
     throw new Error(`Release simulation failed: ${err.message}. Check if trade exists in contract.`);
   }
 
@@ -149,7 +172,7 @@ export async function callReleaseOnChain(params: {
 
   const sendResult = await rpc.sendTransaction(prepared);
   if (sendResult.status === 'ERROR') {
-    console.error('[Stellar] Release send failed:', sendResult.errorResult);
+    params.request.log.error({ detail: sendResult.errorResult, category: 'stellar.tx' }, '[Stellar] Release send failed');
     throw new Error(`Release send failed: ${JSON.stringify(sendResult.errorResult)}`);
   }
 
@@ -164,7 +187,7 @@ export async function callReleaseOnChain(params: {
       if (res.ok) {
         const data = await res.json() as { successful: boolean };
         if (data.successful) {
-          console.log(`[Stellar] Release confirmed: ${txHash}`);
+          params.request.log.info({ tx_hash: txHash, category: 'stellar.tx' }, '[Stellar] Release confirmed');
           return { txHash };
         }
         throw new Error(`Release transaction failed on-chain: ${txHash}`);
@@ -181,10 +204,11 @@ export async function callReleaseOnChain(params: {
  * Legacy mock used when MOCK_STELLAR=true.
  */
 export async function verifyLockOnChain(
+  request: FastifyRequest,
   stellarTradeId: string,
   _expectedSellerAddress: string,
   _expectedAmountStroops: bigint,
 ): Promise<boolean> {
-  console.log(`[MOCK] Verifying lock on-chain for trade ${stellarTradeId} — returning true`);
+  request.log.info({ stellar_trade_id: stellarTradeId, category: 'stellar.tx' }, '[MOCK] Verifying lock on-chain');
   return true;
 }

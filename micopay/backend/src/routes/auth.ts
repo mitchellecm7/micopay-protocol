@@ -37,6 +37,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     challenges.set(stellar_address, { challenge, expiresAt });
 
+    request.log.info({ stellar_address, category: 'auth' }, '[auth] Challenge issued');
     return { challenge, expires_at: new Date(expiresAt).toISOString() };
   });
 
@@ -117,6 +118,7 @@ export async function authRoutes(app: FastifyInstance) {
       { expiresIn: config.jwtExpiry },
     );
 
+    request.log.info({ stellar_address, user_id: user.id, category: 'auth' }, '[auth] Token issued');
     return { token, user };
   });
 }
